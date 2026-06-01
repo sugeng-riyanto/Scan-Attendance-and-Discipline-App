@@ -115,6 +115,31 @@ export function AdminDashboard() {
         </Card>
       </div>
 
+      <Card className="border-emerald-200">
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-0 justify-between">
+            <div className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-emerald-600 shrink-0" />
+              <span className="font-semibold text-sm">Scanner Presensi (/scan)</span>
+            </div>
+            <div className="w-full sm:w-auto">
+              <ScanSessionToggle />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <a href="/scan-discipline" className="block">
+        <Card className="border-blue-200 cursor-pointer hover:bg-blue-50/50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-blue-600" />
+              <span className="font-semibold text-sm">Scan Kedisiplinan (/scan-discipline)</span>
+            </div>
+          </CardContent>
+        </Card>
+      </a>
+
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Aktivitas Presensi Terkini</CardTitle></CardHeader>
         <CardContent>
@@ -153,31 +178,6 @@ export function AdminDashboard() {
           </CardContent>
         </Card>
       )}
-
-      <Card className="border-emerald-200">
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-0 justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-emerald-600 shrink-0" />
-              <span className="font-semibold text-sm">Scanner Presensi (/scan)</span>
-            </div>
-            <div className="w-full sm:w-auto">
-              <ScanSessionToggle />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <a href="/scan-discipline" className="block">
-        <Card className="border-blue-200 cursor-pointer hover:bg-blue-50/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-blue-600" />
-              <span className="font-semibold text-sm">Scan Kedisiplinan (/scan-discipline)</span>
-            </div>
-          </CardContent>
-        </Card>
-      </a>
 
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Aksi Cepat</CardTitle></CardHeader>
