@@ -1,10 +1,12 @@
 {
   "build": {
     "builder": "RAILPACK",
-    "buildCommand": "npx prisma generate && npx prisma migrate deploy && npm run build"
+    "buildCommand": "npx prisma generate && npm run build",
+    "watchPatterns": ["src/**/*", "prisma/**/*", "public/**/*", "package.json", "next.config.ts"]
   },
   "deploy": {
     "startCommand": "sh start.sh",
+    "preDeployCommand": "npx prisma migrate deploy",
     "healthcheckPath": "/",
     "restartPolicyType": "ON_FAILURE"
   }
