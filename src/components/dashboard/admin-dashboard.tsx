@@ -156,12 +156,12 @@ export function AdminDashboard() {
 
       <Card className="border-emerald-200">
         <CardContent className="p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-0 justify-between">
             <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-emerald-600" />
+              <Shield className="h-5 w-5 text-emerald-600 shrink-0" />
               <span className="font-semibold text-sm">Scanner Presensi (/scan)</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="w-full sm:w-auto">
               <ScanSessionToggle />
             </div>
           </div>
