@@ -84,7 +84,7 @@ export function AdminDashboard() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="overflow-hidden">
             {statusData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart><Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}>

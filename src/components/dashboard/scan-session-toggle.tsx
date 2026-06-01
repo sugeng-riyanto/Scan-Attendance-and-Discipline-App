@@ -41,12 +41,12 @@ export function ScanSessionToggle() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <div className={`h-2.5 w-2.5 rounded-full ${session?.active ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
-      <span className="text-xs text-muted-foreground">{session?.active ? 'Aktif' : 'Nonaktif'}</span>
-      {session?.activatedBy && <span className="text-xs text-muted-foreground">({session.activatedBy})</span>}
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${session?.active ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
+      <span className="text-xs text-muted-foreground whitespace-nowrap">{session?.active ? 'Aktif' : 'Nonaktif'}</span>
+      {session?.activatedBy && <span className="text-xs text-muted-foreground truncate max-w-[100px]">({session.activatedBy})</span>}
       <Button size="sm" variant={session?.active ? 'destructive' : 'default'} onClick={toggle} disabled={loading}
-        className={session?.active ? '' : 'bg-emerald-600 hover:bg-emerald-700'}>
+        className={`h-9 text-xs px-3 ${session?.active ? '' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
         {loading ? <RefreshCw className="h-3 w-3 animate-spin" /> : session?.active ? 'Nonaktifkan' : 'Aktifkan'}
       </Button>
     </div>
