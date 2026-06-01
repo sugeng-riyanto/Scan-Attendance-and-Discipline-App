@@ -8,6 +8,7 @@
     "startCommand": "sh start.sh",
     "preDeployCommand": "npx prisma migrate deploy",
     "healthcheckPath": "/",
+    "port": 3000,
     "restartPolicyType": "ON_FAILURE"
   }
 }
