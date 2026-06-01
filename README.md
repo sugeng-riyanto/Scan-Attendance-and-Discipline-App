@@ -1,5 +1,4 @@
-# Presensi Nusantara 2
-
+# Presensi Sekolah
 Aplikasi presensi sekolah berbasis web dengan dukungan **QR Code**, **Face Recognition**, dan **Manajemen Kedisiplinan**. Mendukung 8 level pengguna dengan hak akses berbeda.
 
 ## Fitur Utama
