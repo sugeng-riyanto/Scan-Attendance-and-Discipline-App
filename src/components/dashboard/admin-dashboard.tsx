@@ -6,14 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Users, UserCheck, AlertTriangle, Star, Copy, AlertCircle, Shield, FileSpreadsheet, RefreshCw, CreditCard, ClipboardList } from 'lucide-react'
+import { Users, UserCheck, AlertTriangle, Star, Copy, AlertCircle, Shield, FileSpreadsheet, RefreshCw, CreditCard } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { toast } from 'sonner'
 import { useAppStore } from '@/lib/stores/app-store'
 import { formatTimeWIB, getStatusColor } from '@/lib/attendance-utils'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { PageSkeleton } from './page-skeleton'
-import { ScanSessionToggle } from './scan-session-toggle'
 import { STATUS_COLORS } from './chart-constants'
 import { StatisticsData, AttendanceRecord, BehaviorAlert } from './types'
 
@@ -114,31 +113,6 @@ export function AdminDashboard() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="border-emerald-200">
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-0 justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-emerald-600 shrink-0" />
-              <span className="font-semibold text-sm">Scanner Presensi (/scan)</span>
-            </div>
-            <div className="w-full sm:w-auto">
-              <ScanSessionToggle />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <a href="/scan-discipline" className="block">
-        <Card className="border-blue-200 cursor-pointer hover:bg-blue-50/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-blue-600" />
-              <span className="font-semibold text-sm">Scan Kedisiplinan (/scan-discipline)</span>
-            </div>
-          </CardContent>
-        </Card>
-      </a>
 
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Aktivitas Presensi Terkini</CardTitle></CardHeader>
