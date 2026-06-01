@@ -1,0 +1,357 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "foreignKeys"
+}
+
+model AcademicYear {
+  id        String   @id @default(cuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  students  Student[]
+  classes   Class[]
+}
+
+model Class {
+  id                String   @id @default(cuid())
+  name              String
+  level             String
+  academicYearId    String
+  academicYear      AcademicYear @relation(fields: [academicYearId], references: [id])
+  homeroomTeacherId String? @unique
+  homeroomTeacher   User?   @relation(fields: [homeroomTeacherId], references: [id])
+  students          Student[]
+  dutySchedules     DutySchedule[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  role      String
+  avatar    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student        Student?
+  parent         Parent?
+  teacher        Teacher?
+  homeroomOf     Class?
+  recordedViolations Violation[]
+  recordedGoodDeeds  GoodDeed[]
+  dutySchedules      DutySchedule[]
+  scanActivated      ScanSession[]  @relation("ScanActivator")
+  scanDeactivated    ScanSession[]  @relation("ScanDeactivator")
+  faceCaptures       FaceReference[]
+}
+
+model Student {
+  id                   String   @id @default(cuid())
+  nisn                 String   @unique
+  name                 String
+  classId              String
+  class                Class    @relation(fields: [classId], references: [id])
+  academicYearId       String
+  academicYear         AcademicYear @relation(fields: [academicYearId], references: [id])
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id])
+  qrCode               String   @unique
+  photoUrl             String?
+  gender               String?
+  address              String?
+  email                String?
+  phone                String?
+  status               String   @default("AKTIF")
+  totalViolationPoints Int      @default(0)
+  totalGoodPoints      Int      @default(0)
+  faceCaptureEnabled   Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  attendances    Attendance[]
+  violations     Violation[]
+  goodDeeds      GoodDeed[]
+  permissions    Permission[]
+  parents        Parent[]
+  behaviorAlerts BehaviorAlert[]
+  faceReferences FaceReference[]
+
+  @@index([classId])
+  @@index([academicYearId])
+  @@index([status])
+  @@index([name])
+}
+
+model Parent {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  studentId    String
+  student      Student  @relation(fields: [studentId], references: [id])
+  relationship String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Teacher {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  nip       String?  @unique
+  subjects  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Attendance {
+  id               String    @id @default(cuid())
+  studentId        String
+  student          Student   @relation(fields: [studentId], references: [id])
+  date             DateTime
+  checkInTime      DateTime?
+  checkOutTime     DateTime?
+  status           String
+  checkInMethod    String?
+  checkOutMethod   String?
+  isLateArrival    Boolean   @default(false)
+  isEarlyDeparture Boolean   @default(false)
+  permissionId     String?   @unique
+  permission       Permission? @relation(fields: [permissionId], references: [id])
+  verifiedByFace   Boolean   @default(false)
+  notes            String?
+  checkInLat       Float?
+  checkInLng       Float?
+  checkInAccuracy  Float?
+  checkOutLat      Float?
+  checkOutLng      Float?
+  checkOutAccuracy Float?
+  geoVerified      Boolean   @default(false)
+  deviceInfo       String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([studentId, date])
+  @@index([date])
+  @@index([status])
+  @@index([studentId])
+}
+
+model Permission {
+  id          String    @id @default(cuid())
+  studentId   String
+  student     Student   @relation(fields: [studentId], references: [id])
+  type        String
+  reason      String
+  requestedBy String
+  approvedBy  String?
+  status      String    @default("PENDING")
+  date        DateTime
+  startTime   DateTime?
+  endTime     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  attendance  Attendance?
+
+  @@index([studentId])
+  @@index([status])
+  @@index([date])
+}
+
+model ViolationCategory {
+  id            String    @id @default(cuid())
+  name          String
+  code          String    @unique
+  level         String
+  defaultPoints Int
+  description   String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  violations    Violation[]
+}
+
+model Violation {
+  id               String            @id @default(cuid())
+  studentId        String
+  student          Student           @relation(fields: [studentId], references: [id])
+  categoryId       String
+  category         ViolationCategory @relation(fields: [categoryId], references: [id])
+  points           Int
+  description      String?
+  date             DateTime
+  recordedBy       String
+  recorder         User              @relation(fields: [recordedBy], references: [id])
+  scanMethod       String?           @default("MANUAL")
+  teacherSignature String?
+  studentSignature String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([studentId])
+  @@index([date])
+  @@index([categoryId])
+}
+
+model GoodDeedCategory {
+  id            String   @id @default(cuid())
+  name          String
+  code          String   @unique
+  defaultPoints Int
+  description   String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  goodDeeds     GoodDeed[]
+}
+
+model GoodDeed {
+  id               String          @id @default(cuid())
+  studentId        String
+  student          Student         @relation(fields: [studentId], references: [id])
+  categoryId       String
+  category         GoodDeedCategory @relation(fields: [categoryId], references: [id])
+  points           Int
+  description      String?
+  date             DateTime
+  recordedBy       String
+  recorder         User            @relation(fields: [recordedBy], references: [id])
+  scanMethod       String?         @default("MANUAL")
+  teacherSignature String?
+  studentSignature String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([studentId])
+  @@index([date])
+}
+
+model BehaviorAlert {
+  id           String   @id @default(cuid())
+  studentId    String
+  student      Student  @relation(fields: [studentId], references: [id])
+  alertType    String
+  message      String
+  threshold    Int
+  isRead       Boolean  @default(false)
+  targetRole   String
+  targetUserId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([targetRole])
+  @@index([isRead])
+}
+
+model DutySchedule {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  date        DateTime
+  shift       String   // PAGI, SORE, FULL_DAY
+  classId     String?  // optional: assigned to specific class
+  class       Class?   @relation(fields: [classId], references: [id])
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SchoolDocument {
+  id          String   @id @default(cuid())
+  type        String   // HANDBOOK, CALENDAR, INFORMATION
+  title       String
+  description String?
+  url         String
+  isPublished Boolean  @default(false)
+  createdBy   String
+  period      String?  // WEEKLY, MONTHLY (only for INFORMATION)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([isPublished])
+}
+
+model SchoolConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model GeofenceConfig {
+  id          String   @id @default(cuid())
+  name        String   // e.g. "Gerbang Utama", "Area Sekolah"
+  centerLat   Float    // latitude of geofence center
+  centerLng   Float    // longitude of geofence center
+  radiusMeters Float   // radius in meters (e.g. 100)
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false) // default geofence for check-in
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ScanSession {
+  id          String   @id @default(cuid())
+  isActive    Boolean  @default(false)
+  defaultMode String   @default("FACE")
+  activatedBy String?
+  activator   User?    @relation("ScanActivator", fields: [activatedBy], references: [id])
+  activatedAt DateTime?
+  deactivatedBy String?
+  deactivator User?    @relation("ScanDeactivator", fields: [deactivatedBy], references: [id])
+  deactivatedAt DateTime?
+  shift       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model FaceReference {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id])
+  photoBase64 String   // base64 encoded face photo
+  faceDescriptor String? // JSON array of 128 floats - face embedding vector for recognition
+  captureIndex Int     // which capture number (1-5 recommended)
+  capturedBy  String?  // userId who captured
+  capturer    User?     @relation(fields: [capturedBy], references: [id])
+  captureMethod String? // MANUAL, WEBCAM
+  quality     Float?   // quality score if available
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model OfflineQueue {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String   // CREATE, UPDATE, DELETE
+  entity      String   // attendance, violation, etc.
+  payload     String   // JSON string of the data
+  status      String   @default("PENDING") // PENDING, SYNCED, FAILED
+  attempts    Int      @default(0)
+  lastAttempt DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
