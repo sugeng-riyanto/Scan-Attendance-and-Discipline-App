@@ -469,6 +469,14 @@ export async function POST(request: NextRequest) {
       { key: 'school_name', value: 'SMP-SMA Nusantara', description: 'Nama sekolah' },
       { key: 'school_address', value: 'Jl. Pendidikan No. 1, Indonesia', description: 'Alamat sekolah' },
       { key: 'theme_color', value: '#10b981', description: 'Warna tema aplikasi' },
+      { key: 'demo_show_admin', value: 'true', description: 'Tampilkan demo login Admin' },
+      { key: 'demo_show_kepsek', value: 'true', description: 'Tampilkan demo login Kepsek' },
+      { key: 'demo_show_vpkes', value: 'true', description: 'Tampilkan demo login VP Kesiswaan' },
+      { key: 'demo_show_walikelas', value: 'true', description: 'Tampilkan demo login Wali Kelas' },
+      { key: 'demo_show_guru', value: 'true', description: 'Tampilkan demo login Guru' },
+      { key: 'demo_show_gurujaga', value: 'true', description: 'Tampilkan demo login Guru Jaga' },
+      { key: 'demo_show_ortu', value: 'true', description: 'Tampilkan demo login Orang Tua' },
+      { key: 'demo_show_siswa', value: 'true', description: 'Tampilkan demo login Siswa' },
     ];
     for (const wc of welcomeConfigs) {
       await db.schoolConfig.create({ data: wc });

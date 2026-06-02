@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScrollArea } from '@/components/ui/scroll-area'
+// ScrollArea removed
 import { AlertTriangle, Shield, Star, Plus, Save, Trash2 } from 'lucide-react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { toast } from 'sonner'
@@ -69,19 +69,19 @@ export function VPKesDashboard() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold text-gray-800">Dashboard Wakasek Kesiswaan</h2>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <Card><CardContent className="p-4">
+        <Card className="overflow-hidden"><CardContent className="p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-red-100"><AlertTriangle className="h-5 w-5 text-red-600" /></div>
             <div><p className="text-xs text-muted-foreground">Total Pelanggaran</p><p className="text-2xl font-bold">{stats?.totalViolations || 0}</p></div>
           </div>
         </CardContent></Card>
-        <Card><CardContent className="p-4">
+        <Card className="overflow-hidden"><CardContent className="p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-orange-100"><Shield className="h-5 w-5 text-orange-600" /></div>
             <div><p className="text-xs text-muted-foreground">Eskalasi Level 2+</p><p className="text-2xl font-bold">{alerts.length}</p></div>
           </div>
         </CardContent></Card>
-        <Card><CardContent className="p-4">
+        <Card className="overflow-hidden"><CardContent className="p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-yellow-100"><Star className="h-5 w-5 text-yellow-600" /></div>
             <div><p className="text-xs text-muted-foreground">Total Poin Pelanggaran</p><p className="text-2xl font-bold">{stats?.totalViolationPoints || 0}</p></div>
@@ -90,7 +90,7 @@ export function VPKesDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader className="pb-2"><CardTitle className="text-base">Distribusi Kategori Pelanggaran</CardTitle></CardHeader>
           <CardContent>
             {violCategoryData.length > 0 ? (
@@ -102,7 +102,7 @@ export function VPKesDashboard() {
             ) : <p className="text-center text-muted-foreground py-8">Tidak ada data</p>}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader className="pb-2"><CardTitle className="text-base">Top Pelanggar</CardTitle></CardHeader>
           <CardContent>
             {topV.length > 0 ? topV.map((s, i) => (
@@ -123,7 +123,7 @@ export function VPKesDashboard() {
 
       <DisciplinePatternChart violations={violData?.violations || []} goodDeeds={goodData?.goodDeeds || []} title="Pola Kedisiplinan Sekolah" />
       {classDiscData.length > 0 && (
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader className="pb-2"><CardTitle className="text-base">Perbandingan Kedisiplinan per Kelas</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
@@ -136,7 +136,7 @@ export function VPKesDashboard() {
         </Card>
       )}
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Kelola Kategori Pelanggaran & Kebaikan</CardTitle>
@@ -190,7 +190,7 @@ export function VPKesDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-sm font-semibold mb-2">Pelanggaran ({(catData?.violationCategories || []).length})</p>
-              <ScrollArea className="max-h-48">
+              <div className="max-h-64 overflow-y-auto">
                 {(catData?.violationCategories || []).map(c => (
                   <div key={c.id} className="flex items-center justify-between py-1.5 border-b last:border-0">
                     <div>
@@ -200,11 +200,11 @@ export function VPKesDashboard() {
                     <Button variant="ghost" size="icon" className="h-10 w-10 text-red-400" onClick={() => handleDeleteCategory(c.id, 'violation')}><Trash2 className="h-3 w-3" /></Button>
                   </div>
                 ))}
-              </ScrollArea>
+              </div>
             </div>
             <div>
               <p className="text-sm font-semibold mb-2">Kebaikan ({(catData?.goodDeedCategories || []).length})</p>
-              <ScrollArea className="max-h-48">
+              <div className="max-h-64 overflow-y-auto">
                 {(catData?.goodDeedCategories || []).map(c => (
                   <div key={c.id} className="flex items-center justify-between py-1.5 border-b last:border-0">
                     <div>
@@ -214,7 +214,7 @@ export function VPKesDashboard() {
                     <Button variant="ghost" size="icon" className="h-10 w-10 text-red-400" onClick={() => handleDeleteCategory(c.id, 'good-deed')}><Trash2 className="h-3 w-3" /></Button>
                   </div>
                 ))}
-              </ScrollArea>
+              </div>
             </div>
           </div>
         </CardContent>

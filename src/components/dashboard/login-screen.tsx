@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { GraduationCap, Lock, RefreshCw, Database, QrCode, ClipboardList } from 'lucide-react'
+import { GraduationCap, Lock, RefreshCw, Database, QrCode, ClipboardList, Settings, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiFetch } from '@/lib/api-fetch'
 import { SchoolConfigType, DEMO_CREDS } from '@/lib/types'
@@ -20,6 +20,15 @@ export function LoginScreen({ schoolConfig, themeColor }: { schoolConfig: School
   const [loading, setLoading] = useState(false)
   const [setupLoading, setSetupLoading] = useState(false)
   const [setupDone, setSetupDone] = useState(false)
+  const [showDemoSettings, setShowDemoSettings] = useState(false)
+  const [demoVisibility, setDemoVisibility] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    DEMO_CREDS.forEach(d => {
+      const configKey = `demo_show_${d.role.toLowerCase().replace(/_/g, '')}`
+      initial[d.role] = (schoolConfig as any)[configKey] !== 'false'
+    })
+    return initial
+  })
 
   const handleLogin = async (u?: string, p?: string) => {
     const un = u || username
@@ -85,12 +94,25 @@ export function LoginScreen({ schoolConfig, themeColor }: { schoolConfig: School
             Masuk
           </Button>
 
-          <Separator className="my-4" />
-
           <div>
-            <p className="text-xs text-muted-foreground mb-3 text-center">Demo Login Cepat</p>
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <p className="text-xs text-muted-foreground">Demo Login Cepat</p>
+              <button type="button" onClick={() => setShowDemoSettings(!showDemoSettings)} className="text-muted-foreground hover:text-foreground transition-colors" title="Atur visibilitas demo">
+                {showDemoSettings ? <EyeOff className="h-3 w-3" /> : <Settings className="h-3 w-3" />}
+              </button>
+            </div>
+            {showDemoSettings && (
+              <div className="mb-3 p-2 bg-gray-50 rounded space-y-1">
+                {DEMO_CREDS.map(d => (
+                  <label key={d.role} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={demoVisibility[d.role]} onChange={() => setDemoVisibility(prev => ({ ...prev, [d.role]: !prev[d.role] }))} />
+                    {d.label}
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {DEMO_CREDS.map(d => (
+              {DEMO_CREDS.filter(d => demoVisibility[d.role]).map(d => (
                 <Button key={d.username} variant="outline" size="sm" className="text-xs h-11 px-2"
                   onClick={() => handleLogin(d.username, d.password)} disabled={loading}>
                   {d.label}
@@ -99,11 +121,15 @@ export function LoginScreen({ schoolConfig, themeColor }: { schoolConfig: School
             </div>
           </div>
 
-          <Separator />
-          <Button variant="ghost" className="w-full text-muted-foreground" onClick={handleSetup} disabled={setupLoading}>
-            {setupLoading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Database className="h-4 w-4 mr-2" />}
-            {setupDone ? '✅ Setup Selesai (Klik untuk Re-seed)' : 'Setup Database (Data Demo)'}
-          </Button>
+          {DEMO_CREDS.some(d => demoVisibility[d.role]) && (
+            <>
+              <Separator />
+              <Button variant="ghost" className="w-full text-muted-foreground" onClick={handleSetup} disabled={setupLoading}>
+                {setupLoading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Database className="h-4 w-4 mr-2" />}
+                {setupDone ? '✅ Setup Selesai (Klik untuk Re-seed)' : 'Setup Database (Data Demo)'}
+              </Button>
+            </>
+          )}
 
           <Separator />
           <a href="/scan" className="block">
@@ -116,6 +142,10 @@ export function LoginScreen({ schoolConfig, themeColor }: { schoolConfig: School
               <ClipboardList className="h-4 w-4 mr-2" /> Scan Kedisiplinan (Login)
             </Button>
           </a>
+          <Separator />
+          <div className="pt-4 text-center">
+            <p className="text-xs text-gray-400">&copy; {new Date().getFullYear()} {schoolConfig.school_name || 'Sekolah'}. All rights reserved.</p>
+          </div>
         </CardContent>
       </Card>
     </div>

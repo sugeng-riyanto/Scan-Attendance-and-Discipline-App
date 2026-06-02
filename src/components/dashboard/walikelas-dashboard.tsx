@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScrollArea } from '@/components/ui/scroll-area'
+// ScrollArea removed — replaced with plain div for stability
 import { Textarea } from '@/components/ui/textarea'
 import { Clock, Send, Plus, ChevronRight, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -56,9 +56,9 @@ function WaliKelasStudentView({ myClass }: { myClass: ClassInfo }) {
           <p className="text-xs text-muted-foreground">Manajemen siswa oleh Admin</p>
         </div>
       </CardHeader>
-      <CardContent>
-        {loading ? <Skeleton className="h-32" /> : (
-          <ScrollArea className="max-h-64">
+          <CardContent className="p-0 overflow-hidden">
+            {loading ? <Skeleton className="h-32 m-4" /> : (
+              <div className="max-h-64 overflow-y-auto">
             {students.map(s => (
               <div key={s.id} className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-gray-50 rounded px-1"
                 onClick={() => { setSelectedStudentId(s.id); setActivePage('student-profile') }}>
@@ -78,10 +78,10 @@ function WaliKelasStudentView({ myClass }: { myClass: ClassInfo }) {
               </div>
             ))}
             {students.length === 0 && <p className="text-center text-muted-foreground py-4 text-sm">Belum ada siswa di kelas ini</p>}
-          </ScrollArea>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          )}
+        </CardContent>
+      </Card>
   )
 }
 
@@ -281,13 +281,13 @@ export function WaliKelasDashboard() {
               <Clock className="h-4 w-4" /> Semua Permohonan Izin Kelas ({allClassPermissions.length})
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-64">
+          <CardContent className="p-0 overflow-hidden">
+            <div className="max-h-64 overflow-y-auto">
               {allClassPermissions.map(p => (
-                <div key={p.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                <div key={p.id} className="flex items-center justify-between py-2 px-4 border-b last:border-0">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{p.student?.name} {p.attachmentData && <span className="text-[10px] text-blue-600">📎</span>}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground truncate">
                       {permissionTypeLabels[p.type] || p.type} • {formatDateShort(p.date)} • {p.reason}
                     </p>
                   </div>
@@ -296,7 +296,7 @@ export function WaliKelasDashboard() {
                   </Badge>
                 </div>
               ))}
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}

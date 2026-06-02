@@ -1,6 +1,9 @@
 export interface SchoolConfigType {
   school_name: string; school_address: string; school_logo: string; theme_color: string;
   timezone: string; checkin_cutoff_hour: string;
+  demo_show_admin?: string; demo_show_kepsek?: string; demo_show_vpkes?: string;
+  demo_show_walikelas?: string; demo_show_guru?: string; demo_show_gurujaga?: string;
+  demo_show_ortu?: string; demo_show_siswa?: string;
 }
 
 export const DEFAULT_SCHOOL_CONFIG: SchoolConfigType = {
@@ -10,6 +13,9 @@ export const DEFAULT_SCHOOL_CONFIG: SchoolConfigType = {
   theme_color: '#10b981',
   timezone: 'Asia/Jakarta',
   checkin_cutoff_hour: '7',
+  demo_show_admin: 'true', demo_show_kepsek: 'true', demo_show_vpkes: 'true',
+  demo_show_walikelas: 'true', demo_show_guru: 'true', demo_show_gurujaga: 'true',
+  demo_show_ortu: 'true', demo_show_siswa: 'true',
 }
 
 export const DEMO_CREDS = [
