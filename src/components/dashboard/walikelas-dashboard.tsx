@@ -200,13 +200,13 @@ export function WaliKelasDashboard() {
           <CardContent>
             {classPermissions.slice(0, 5).map(p => (
               <div key={p.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                <div>
-                  <p className="text-sm font-medium">{p.student?.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium flex items-center gap-1">{p.student?.name} {p.attachmentData && <span className="text-[10px] text-blue-600">📎</span>}</p>
                   <p className="text-xs text-muted-foreground">
                     {permissionTypeLabels[p.type] || p.type} • {formatDateShort(p.date)} • {p.reason}
                   </p>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 shrink-0 ml-2">
                   <Button size="sm" variant="outline" className="h-7 text-xs text-green-600 border-green-300 hover:bg-green-50"
                     onClick={() => handleApprovePermission(p.id, 'APPROVED')}>Setujui</Button>
                   <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 border-red-300 hover:bg-red-50"
@@ -285,8 +285,8 @@ export function WaliKelasDashboard() {
             <ScrollArea className="max-h-64">
               {allClassPermissions.map(p => (
                 <div key={p.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                  <div>
-                    <p className="text-sm font-medium">{p.student?.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{p.student?.name} {p.attachmentData && <span className="text-[10px] text-blue-600">📎</span>}</p>
                     <p className="text-xs text-muted-foreground">
                       {permissionTypeLabels[p.type] || p.type} • {formatDateShort(p.date)} • {p.reason}
                     </p>

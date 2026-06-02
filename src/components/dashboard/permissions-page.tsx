@@ -132,7 +132,7 @@ export function PermissionsPage() {
               <div><Label>Jam Mulai</Label><Input type="time" value={formData.startTime} onChange={e => setFormData(p => ({ ...p, startTime: e.target.value }))} /></div>
               <div><Label>Jam Selesai</Label><Input type="time" value={formData.endTime} onChange={e => setFormData(p => ({ ...p, endTime: e.target.value }))} /></div>
             </div>
-            <div><Label>Alasan</Label><Textarea value={formData.reason} onChange={e => setFormData(p => ({ ...p, reason: e.target.value }))} rows={3} /></div>
+              <div><Label>Alasan / Deskripsi</Label><Textarea value={formData.reason} onChange={e => setFormData(p => ({ ...p, reason: e.target.value }))} rows={3} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Batal</Button>
@@ -153,6 +153,7 @@ export function PermissionsPage() {
                     <p className="text-sm mt-1">{p.reason}</p>
                     <div className="flex gap-2 mt-1">
                       <Badge variant="outline">{permissionTypeLabels[p.type] || p.type}</Badge>
+                      {p.attachmentData && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">📎 Lampiran</span>}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">

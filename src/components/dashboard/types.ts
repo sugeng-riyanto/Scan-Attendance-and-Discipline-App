@@ -44,6 +44,9 @@ export interface PermissionRecord {
   requestedBy: string; approvedBy?: string; status: string;
   date: string; startTime?: string; endTime?: string;
   student?: Student;
+  attachmentData?: string;
+  attachmentType?: string;
+  attachmentName?: string;
 }
 
 export interface CategoryInfo {

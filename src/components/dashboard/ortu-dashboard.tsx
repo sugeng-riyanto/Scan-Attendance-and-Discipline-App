@@ -198,7 +198,7 @@ function OrtuPermissionList({ studentId }: { studentId: string }) {
                   {p.startTime && p.endTime && <p className="text-xs text-muted-foreground">{p.startTime} - {p.endTime}</p>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0 ml-2">
-                  {(p as any).attachmentData && (
+                  {p.attachmentData && (
                     <button onClick={() => setPreviewAttach(p)} className="text-[10px] text-blue-600 hover:text-blue-800 underline">
                       📎 Lampiran
                     </button>
@@ -214,15 +214,15 @@ function OrtuPermissionList({ studentId }: { studentId: string }) {
       </CardContent>
 
       {/* Attachment Preview Modal */}
-      {previewAttach && (previewAttach as any).attachmentData && (
+      {previewAttach && previewAttach.attachmentData && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewAttach(null)}>
           <div className="relative bg-white rounded-xl max-w-lg w-full max-h-[80vh] overflow-auto p-4" onClick={e => e.stopPropagation()}>
             <button onClick={() => setPreviewAttach(null)} className="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full w-8 h-8 flex items-center justify-center text-sm">✕</button>
-            <p className="font-medium text-sm mb-3">Lampiran: {(previewAttach as any).attachmentName || 'Dokumen'}</p>
-            {(previewAttach as any).attachmentType === 'application/pdf' ? (
-              <embed src={(previewAttach as any).attachmentData} type="application/pdf" className="w-full h-[60vh] rounded" />
+            <p className="font-medium text-sm mb-3">Lampiran: {previewAttach.attachmentName || 'Dokumen'}</p>
+            {previewAttach.attachmentType === 'application/pdf' ? (
+              <embed src={previewAttach.attachmentData} type="application/pdf" className="w-full h-[60vh] rounded" />
             ) : (
-              <img src={(previewAttach as any).attachmentData} alt="Lampiran" className="max-w-full rounded" />
+              <img src={previewAttach.attachmentData} alt="Lampiran" className="max-w-full rounded" />
             )}
           </div>
         </div>
