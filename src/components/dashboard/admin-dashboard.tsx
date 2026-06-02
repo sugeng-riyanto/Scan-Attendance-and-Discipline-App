@@ -140,43 +140,47 @@ export function AdminDashboard() {
         </Card>
       </a>
 
-      <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-base">Aktivitas Presensi Terkini</CardTitle></CardHeader>
-        <CardContent>
-          <ScrollArea className="max-h-64">
-            {recentAtt.length > 0 ? recentAtt.map(a => (
-              <div key={a.id} className="flex items-center justify-between py-2 border-b last:border-0">
-                <div className="flex items-center gap-2">
-                  <Avatar className="h-8 w-8"><AvatarFallback className="text-xs">{a.student?.name?.charAt(0)}</AvatarFallback></Avatar>
-                  <div>
-                    <p className="text-sm font-medium">{a.student?.name}</p>
-                    <p className="text-xs text-muted-foreground">{a.student?.class?.name} • {a.checkInTime ? formatTimeWIB(a.checkInTime) : '-'}</p>
-                  </div>
-                </div>
-                <Badge className={getStatusColor(a.status as any)}>{a.status}</Badge>
-              </div>
-            )) : <p className="text-center text-muted-foreground py-4">Belum ada aktivitas hari ini</p>}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-
-      {alerts.length > 0 && (
+      <div className="w-full overflow-hidden">
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Peringatan Kedisiplinan</CardTitle></CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-48">
-              {alerts.slice(0, 5).map(a => (
-                <div key={a.id} className="flex items-start gap-2 py-2 border-b last:border-0">
-                  <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm">{a.message}</p>
-                    <p className="text-xs text-muted-foreground">{new Date((a as any).createdAt || '').toLocaleString('id-ID')}</p>
+          <CardHeader className="pb-2"><CardTitle className="text-base">Aktivitas Presensi Terkini</CardTitle></CardHeader>
+          <CardContent className="p-0 overflow-hidden">
+            <div className="max-h-64 overflow-y-auto">
+              {recentAtt.length > 0 ? recentAtt.map(a => (
+                <div key={a.id} className="flex items-center justify-between py-2 px-4 border-b last:border-0">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <Avatar className="h-8 w-8 shrink-0"><AvatarFallback className="text-xs">{a.student?.name?.charAt(0)}</AvatarFallback></Avatar>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{a.student?.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{a.student?.class?.name} • {a.checkInTime ? formatTimeWIB(a.checkInTime) : '-'}</p>
+                    </div>
                   </div>
+                  <Badge className={getStatusColor(a.status as any) + ' shrink-0 ml-2'}>{a.status}</Badge>
                 </div>
-              ))}
-            </ScrollArea>
+              )) : <p className="text-center text-muted-foreground py-4">Belum ada aktivitas hari ini</p>}
+            </div>
           </CardContent>
         </Card>
+      </div>
+
+      {alerts.length > 0 && (
+        <div className="w-full overflow-hidden">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base">Peringatan Kedisiplinan</CardTitle></CardHeader>
+            <CardContent className="p-0 overflow-hidden">
+              <div className="max-h-48 overflow-y-auto">
+                {alerts.slice(0, 5).map(a => (
+                  <div key={a.id} className="flex items-start gap-2 py-2 px-4 border-b last:border-0">
+                    <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm">{a.message}</p>
+                      <p className="text-xs text-muted-foreground">{new Date((a as any).createdAt || '').toLocaleString('id-ID')}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <Card>
