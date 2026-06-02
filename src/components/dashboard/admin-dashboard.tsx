@@ -13,9 +13,55 @@ import { useAppStore } from '@/lib/stores/app-store'
 import { formatTimeWIB, getStatusColor } from '@/lib/attendance-utils'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { PageSkeleton } from './page-skeleton'
-import { ScanSessionToggle } from './scan-session-toggle'
 import { STATUS_COLORS } from './chart-constants'
 import { StatisticsData, AttendanceRecord, BehaviorAlert } from './types'
+import { apiFetch } from '@/lib/api-fetch'
+import { DEMO_CREDS } from '@/lib/types'
+
+function DemoLoginToggles() {
+  const [toggles, setToggles] = React.useState<Record<string, boolean>>({})
+  const [loading, setLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    fetch('/api/school-config')
+      .then(r => r.json())
+      .then((data: { configs: { key: string; value: string }[] }) => {
+        const map: Record<string, boolean> = {}
+        DEMO_CREDS.forEach(d => {
+          const key = `demo_show_${d.role.toLowerCase()}`
+          const cfg = data.configs.find(c => c.key === key)
+          map[d.role] = cfg ? cfg.value !== 'false' : true
+        })
+        setToggles(map)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const handleToggle = async (role: string, checked: boolean) => {
+    setToggles(prev => ({ ...prev, [role]: checked }))
+    const key = `demo_show_${role.toLowerCase()}`
+    try {
+      await fetch('/api/school-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value: checked ? 'true' : 'false', description: `Tampilkan demo login ${role}` }),
+      })
+    } catch { /* ignore */ }
+  }
+
+  if (loading) return <div className="text-xs text-gray-400">Memuat...</div>
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {DEMO_CREDS.map(d => (
+        <label key={d.role} className="flex items-center gap-2 text-xs cursor-pointer p-1.5 rounded hover:bg-gray-50">
+          <input type="checkbox" checked={toggles[d.role] ?? true} onChange={e => handleToggle(d.role, e.target.checked)} className="rounded" />
+          {d.label}
+        </label>
+      ))}
+    </div>
+  )
+}
 
 export function AdminDashboard() {
   const today = new Date().toISOString().split('T')[0]
@@ -182,6 +228,20 @@ export function AdminDashboard() {
           </Card>
         </div>
       )}
+
+      {/* Demo Login Visibility Settings */}
+      <Card className="overflow-hidden">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Tampilan Demo Login</CardTitle>
+            <RefreshCw className="h-3 w-3 text-muted-foreground" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">Atur tombol demo login yang muncul di halaman login.</p>
+          <DemoLoginToggles />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Aksi Cepat</CardTitle></CardHeader>
