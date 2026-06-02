@@ -399,6 +399,7 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
   const me = initialStudent || studentsData?.students?.find(s => s.user?.id === user?.id) || studentsData?.students?.find(s => s.nisn === user?.username)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
+  const [zoomLevel, setZoomLevel] = useState(1)
 
   useEffect(() => {
     if (me?.nisn) {
@@ -434,7 +435,7 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
     <div className="space-y-6">
       <h2 className="text-xl font-bold text-gray-800">Kartu Identitas Siswa</h2>
       <div className="flex justify-center">
-        <div id="student-id-card" className="inline-block cursor-pointer" onClick={() => setFullscreenId('student-id-card')}>
+        <div id="student-id-card" className="inline-block cursor-pointer" onClick={() => { setFullscreenId('student-id-card'); setZoomLevel(1) }}>
           <IdCardFace student={me} qrDataUrl={qrDataUrl} schoolConfig={schoolConfig} themeColor={themeColor} />
         </div>
       </div>
@@ -447,42 +448,43 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
         </Button>
       </div>
 
-      {/* Fullscreen overlay — centered, responsive portrait/landscape */}
+      {/* Fullscreen overlay — centered, zoomable */}
       {fullscreenId && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4" onClick={() => setFullscreenId(null)}>
-          <div className="relative flex flex-col items-center justify-center w-full h-full" onClick={e => e.stopPropagation()}>
-            {/* Close button */}
-            <button onClick={() => setFullscreenId(null)}
-              className="absolute top-3 right-3 z-20 bg-white/10 hover:bg-white/25 text-white rounded-full w-11 h-11 flex items-center justify-center text-lg shadow-lg backdrop-blur-sm">
-              ✕
-            </button>
-            {/* Card — centered both axis, auto-scaled */}
-            <div className="flex items-center justify-center w-full h-full p-4 sm:p-8">
-              <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full"
-                style={{
-                  maxWidth: 'min(92vw, 500px)',
-                  maxHeight: 'min(85vh, 700px)',
-                }}>
-                <div className="w-full h-full flex items-center justify-center"
-                  style={{
-                    transform: 'scale(var(--card-scale))',
-                    transformOrigin: 'center center',
-                  }}>
-                  <div className="w-full max-w-sm sm:max-w-md" ref={el => {
-                    if (!el) return;
-                    const parent = el.parentElement?.parentElement;
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-0 sm:p-2" onClick={() => setFullscreenId(null)}>
+          <div className="relative flex flex-col items-center justify-center w-full h-full overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Top bar: close + zoom controls */}
+            <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 py-2 bg-gradient-to-b from-black/40 to-transparent">
+              <button onClick={() => setFullscreenId(null)}
+                className="text-white/80 hover:text-white rounded-full w-10 h-10 flex items-center justify-center text-lg">
+                ← Kembali
+              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.25))}
+                  className="bg-white/10 hover:bg-white/25 text-white rounded-full w-9 h-9 flex items-center justify-center text-sm backdrop-blur-sm">−</button>
+                <span className="text-white/80 text-xs font-medium w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
+                <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.25))}
+                  className="bg-white/10 hover:bg-white/25 text-white rounded-full w-9 h-9 flex items-center justify-center text-sm backdrop-blur-sm">+</button>
+                <button onClick={() => setZoomLevel(1)}
+                  className="bg-white/10 hover:bg-white/25 text-white rounded-full w-9 h-9 flex items-center justify-center text-xs backdrop-blur-sm">↺</button>
+              </div>
+            </div>
+            {/* Scrollable/zoomable card area */}
+            <div className="w-full h-full overflow-auto touch-auto" style={{ touchAction: 'pinch-zoom' }}>
+              <div className="min-h-full flex items-center justify-center p-4 sm:p-8"
+                style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}>
+                <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-sm sm:max-w-md"
+                  ref={el => {
+                    if (!el || zoomLevel !== 1) return;
+                    const parent = el.parentElement?.parentElement?.parentElement;
                     if (!parent) return;
                     const pw = parent.clientWidth;
                     const ph = parent.clientHeight;
                     const cw = el.scrollWidth;
                     const ch = el.scrollHeight;
-                    const scaleX = (pw - 32) / cw;
-                    const scaleY = (ph - 32) / ch;
-                    const s = Math.min(scaleX, scaleY, 1.2);
-                    (el.parentElement as HTMLElement)?.style.setProperty('--card-scale', String(Math.min(s, 1)));
+                    const fitScale = Math.min((pw - 48) / cw, (ph - 48) / ch, 1);
+                    if (fitScale < 1) el.style.transform = `scale(${fitScale})`;
                   }}>
-                    <IdCardFace student={me} qrDataUrl={qrDataUrl} schoolConfig={schoolConfig} themeColor={themeColor} />
-                  </div>
+                  <IdCardFace student={me} qrDataUrl={qrDataUrl} schoolConfig={schoolConfig} themeColor={themeColor} />
                 </div>
               </div>
             </div>
