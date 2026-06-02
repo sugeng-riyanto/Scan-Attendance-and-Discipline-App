@@ -23,7 +23,8 @@ export type AppPage =
   | 'id-card'
   | 'face-capture'
   | 'discipline-scan'
-  | 'school-documents';
+  | 'school-documents'
+  | 'duty-schedule';
 
 interface Notification {
   id: string;

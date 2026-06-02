@@ -1,5 +1,5 @@
 import React from 'react'
-import { Home, Activity, ScanLine, FileText, Clock, AlertTriangle, Star, TrendingUp, BarChart3, Download, CreditCard, Settings, Camera, ClipboardList } from 'lucide-react'
+import { Home, Activity, ScanLine, FileText, Clock, AlertTriangle, Star, TrendingUp, BarChart3, Download, CreditCard, Settings, Camera, ClipboardList, CalendarRange } from 'lucide-react'
 import { AppPage } from '@/lib/stores/app-store'
 
 export interface NavItem {
@@ -19,6 +19,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'discipline-scan', label: 'Scan Kedisiplinan', icon: <ClipboardList className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU','GURU_JAGA'] },
   { id: 'export', label: 'Export', icon: <Download className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU_JAGA'] },
   { id: 'id-card', label: 'ID Card', icon: <CreditCard className="h-5 w-5" />, roles: ['ADMIN','WALI_KELAS','VP_KESISWAAN','SISWA'] },
+  { id: 'duty-schedule', label: 'Jadwal Guru Jaga', icon: <CalendarRange className="h-5 w-5" />, roles: ['VP_KESISWAAN'] },
+  { id: 'duty-schedule', label: 'Jadwal Guru Jaga', icon: <CalendarRange className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','WALI_KELAS','GURU','GURU_JAGA'] },
   { id: 'settings', label: 'Pengaturan', icon: <Settings className="h-5 w-5" />, roles: ['ADMIN','VP_KESISWAAN'] },
   { id: 'face-capture', label: 'Capture Wajah', icon: <Camera className="h-5 w-5" />, roles: ['ADMIN'] },
   { id: 'school-documents', label: 'Dokumen Sekolah', icon: <FileText className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU','GURU_JAGA','ORANG_TUA','SISWA'] },

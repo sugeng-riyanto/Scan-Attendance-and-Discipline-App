@@ -29,7 +29,6 @@ model Class {
   homeroomTeacherId String? @unique
   homeroomTeacher   User?   @relation(fields: [homeroomTeacherId], references: [id])
   students          Student[]
-  dutySchedules     DutySchedule[]
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
@@ -51,8 +50,10 @@ model User {
   homeroomOf     Class?
   recordedViolations Violation[]
   recordedGoodDeeds  GoodDeed[]
-  dutySchedules      DutySchedule[]
-  scanActivated      ScanSession[]  @relation("ScanActivator")
+  dutySchedules        DutySchedule[]
+  dutySubstitutes      DutySubstitute[]     @relation("SubstituteTeacher")
+  dutyOriginalSchedules DutySubstitute[]    @relation("OriginalTeacher")
+  scanActivated        ScanSession[]        @relation("ScanActivator")
   scanDeactivated    ScanSession[]  @relation("ScanDeactivator")
   faceCaptures       FaceReference[]
 }
@@ -264,16 +265,38 @@ model BehaviorAlert {
 }
 
 model DutySchedule {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  date        DateTime
-  shift       String   // PAGI, SORE, FULL_DAY
-  classId     String?  // optional: assigned to specific class
-  class       Class?   @relation(fields: [classId], references: [id])
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String          @id @default(cuid())
+  dayOfWeek   Int             // ISO: 1=Monday..7=Sunday
+  startTime   String          // "HH:mm" 24h format
+  endTime     String          // "HH:mm" 24h format
+  teacherId   String
+  teacher     User            @relation(fields: [teacherId], references: [id])
+  location    String
+  tasks       Json            @default("[]")
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  substitutes DutySubstitute[]
+
+  @@index([dayOfWeek, isActive])
+  @@index([teacherId])
+}
+
+model DutySubstitute {
+  id                  String   @id @default(cuid())
+  dutyScheduleId      String
+  dutySchedule        DutySchedule @relation(fields: [dutyScheduleId], references: [id], onDelete: Cascade)
+  substituteTeacherId String
+  substituteTeacher   User     @relation("SubstituteTeacher", fields: [substituteTeacherId], references: [id])
+  originalTeacherId   String
+  originalTeacher     User     @relation("OriginalTeacher", fields: [originalTeacherId], references: [id])
+  substituteDate      DateTime @db.Date
+  reason              String?
+  createdAt           DateTime @default(now())
+
+  @@unique([dutyScheduleId, substituteDate])
+  @@index([substituteDate])
 }
 
 model SchoolDocument {

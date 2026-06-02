@@ -31,6 +31,8 @@ import { ExportPage } from './export-page'
 import { SettingsPage } from './settings-page'
 import { FaceCapturePage } from './face-capture-page'
 import { SchoolDocumentsPage } from './school-documents-page'
+import DutyScheduleManager from './duty-schedule-manager'
+import { DutyScheduleWidget } from './duty-schedule-widget'
 import { ErrorBoundary } from './error-boundary'
 
 export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConfigType; themeColor: string }) {
@@ -67,6 +69,9 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
       case 'settings': return <SettingsPage themeColor={themeColor} />
       case 'face-capture': return <FaceCapturePage />
       case 'school-documents': return <SchoolDocumentsPage />
+      case 'duty-schedule':
+        if (user.role === 'VP_KESISWAAN') return <DutyScheduleManager />
+        return <DutyScheduleWidget userId={user.id} role={user.role} />
       default: return <AdminDashboard />
     }
   }

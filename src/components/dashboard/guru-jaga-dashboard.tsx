@@ -130,7 +130,10 @@ export function GuruJagaDashboard() {
         </div>
       </div>
 
-      {dutySchedules.length > 0 && (
+      {dutySchedules.filter((d: any) => {
+        const day = new Date().getDay() === 0 ? 7 : new Date().getDay()
+        return d.dayOfWeek === day
+      }).length > 0 && (
         <Card className="border-emerald-200 bg-emerald-50">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -138,8 +141,11 @@ export function GuruJagaDashboard() {
               <span className="font-semibold text-sm">Guru Jaga Hari Ini</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {dutySchedules.map((d: any, i: number) => (
-                <Badge key={i} className="bg-emerald-100 text-emerald-800">{d.teacher?.name || d.name || '-'} ({d.shift || 'Pagi'})</Badge>
+              {dutySchedules.filter((d: any) => {
+                const day = new Date().getDay() === 0 ? 7 : new Date().getDay()
+                return d.dayOfWeek === day
+              }).map((d: any, i: number) => (
+                <Badge key={i} className="bg-emerald-100 text-emerald-800">{d.teacher?.name || '-'} ({d.startTime}-{d.endTime})</Badge>
               ))}
             </div>
           </CardContent>

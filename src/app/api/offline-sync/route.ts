@@ -551,7 +551,6 @@ async function processGenericEntity(
   const entityModelMap: Record<string, string> = {
     permission: 'permission',
     'behavior-alert': 'behaviorAlert',
-    'duty-schedule': 'dutySchedule',
     'scan-session': 'scanSession',
   };
 

@@ -387,24 +387,29 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 11b. Create Duty Schedules for Guru Jaga (today and past 3 weekdays)
+    // 11b. Create Duty Schedules for Guru Jaga (weekly recurring)
     const jagaUsers = createdUsers.filter(u => u.role === 'GURU_JAGA');
-    for (let dayOffset = 0; dayOffset < 4; dayOffset++) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - dayOffset);
-      if (date.getDay() === 0 || date.getDay() === 6) continue;
-      for (const ju of jagaUsers) {
-        const shift = jagaUsers.indexOf(ju) === 0 ? 'PAGI' : 'SORE';
+    const locations = ['Gerbang Utama', 'Lapangan', 'Koridor Barat', 'Kantin', 'Parkiran'];
+    const sampleTasks = [
+      { label: 'Mengecek kebersihan lingkungan', isRequired: true },
+      { label: 'Mengawasi siswa saat istirahat', isRequired: true },
+      { label: 'Mencatat kehadiran guru', isRequired: false },
+    ];
+    for (let day = 1; day <= 5; day++) {
+      for (let i = 0; i < jagaUsers.length; i++) {
         try {
           await db.dutySchedule.create({
             data: {
-              userId: ju.id,
-              date: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
-              shift,
-              notes: `Jadwal jaga ${shift.toLowerCase()}`,
+              dayOfWeek: day,
+              startTime: i === 0 ? '06:00' : '10:00',
+              endTime: i === 0 ? '10:00' : '14:00',
+              teacherId: jagaUsers[i].id,
+              location: locations[i % locations.length],
+              tasks: sampleTasks,
+              isActive: true,
             },
           });
-        } catch (e) { /* skip duplicates */ }
+        } catch (e) { /* skip */ }
       }
     }
 
