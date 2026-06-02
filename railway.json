@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "sh start.sh",
-    "preDeployCommand": "echo 'DELETE FROM \"DutySchedule\";' | npx prisma db execute --stdin 2>/dev/null; npx prisma db push",
+    "preDeployCommand": "npx prisma db push --force-reset 2>&1",
     "healthcheckPath": "/",
     "port": 3000,
     "restartPolicyType": "ON_FAILURE"
