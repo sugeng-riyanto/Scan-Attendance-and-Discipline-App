@@ -17,6 +17,7 @@ import { STATUS_COLORS } from './chart-constants'
 import { StatisticsData, AttendanceRecord, BehaviorAlert } from './types'
 import { apiFetch } from '@/lib/api-fetch'
 import { DEMO_CREDS } from '@/lib/types'
+import { ScanSessionToggle } from './scan-session-toggle'
 
 function DemoLoginToggles() {
   const [toggles, setToggles] = React.useState<Record<string, boolean>>({})
