@@ -150,6 +150,7 @@ export const permissionTypeLabels: Record<string, string> = {
   LATE_ARRIVAL: 'Izin Datang Terlambat',
   EARLY_DEPARTURE: 'Izin Pulang Awal',
   ABSENCE: 'Izin Tidak Hadir',
+  SICK: 'Sakit',
 };
 
 /**

@@ -151,19 +151,22 @@ model Attendance {
 }
 
 model Permission {
-  id          String    @id @default(cuid())
-  studentId   String
-  student     Student   @relation(fields: [studentId], references: [id])
-  type        String
-  reason      String
-  requestedBy String
-  approvedBy  String?
-  status      String    @default("PENDING")
-  date        DateTime
-  startTime   DateTime?
-  endTime     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id])
+  type           String
+  reason         String
+  requestedBy    String
+  approvedBy     String?
+  status         String    @default("PENDING")
+  date           DateTime
+  startTime      DateTime?
+  endTime        DateTime?
+  attachmentData String?   @db.Text
+  attachmentType String?
+  attachmentName String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   attendance  Attendance?
 

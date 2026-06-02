@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertTriangle, AlertCircle, CheckCircle, Clock, Plus, Send, RefreshCw, Star, CreditCard, QrCode, Eye, Image, Download, User, GraduationCap, BookOpen, Calendar, Shield } from 'lucide-react'
+import { AlertTriangle, AlertCircle, CheckCircle, Clock, Plus, Send, RefreshCw, Star, CreditCard, QrCode, Eye, Image, Download, User, GraduationCap, BookOpen, Calendar, Shield, Camera, Paperclip, FileText, X } from 'lucide-react'
 import { Student, BehaviorAlert, AttendanceRecord, ViolationRecord, GoodDeedRecord, PermissionRecord } from './types'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { DisciplinePatternChart } from './discipline-pattern-chart'
@@ -32,10 +32,28 @@ function InlinePermissionForm({ studentId, studentName, requestedBy, onSuccess }
     startTime: '07:00',
     endTime: '14:00',
   })
+  const [attachment, setAttachment] = useState<{ data: string; type: string; name: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setAttachment({
+        data: reader.result as string,
+        type: file.type,
+        name: file.name,
+      })
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
 
   const handleSubmit = async () => {
     if (!requestedBy) { toast.error('Sesi login tidak valid. Silakan login ulang.'); return }
-    if (!form.reason || !form.date) { toast.error('Lengkapi alasan dan tanggal'); return }
+    if (!form.reason || !form.date) { toast.error('Lengkapi Alasan/Deskripsi dan tanggal'); return }
     setSubmitting(true)
     try {
       await apiFetch('/api/permissions', {
@@ -49,11 +67,15 @@ function InlinePermissionForm({ studentId, studentName, requestedBy, onSuccess }
           date: form.date,
           startTime: form.startTime,
           endTime: form.endTime,
+          attachmentData: attachment?.data,
+          attachmentType: attachment?.type,
+          attachmentName: attachment?.name,
         }),
       })
       toast.success('Izin berhasil diajukan')
       setExpanded(false)
       setForm({ type: 'ABSENCE', reason: '', date: new Date().toISOString().split('T')[0], startTime: '07:00', endTime: '14:00' })
+      setAttachment(null)
       onSuccess()
     } catch (err: any) {
       toast.error(err.message || 'Gagal mengajukan izin')
@@ -98,13 +120,45 @@ function InlinePermissionForm({ studentId, studentName, requestedBy, onSuccess }
               <Input type="time" value={form.endTime} onChange={e => setForm(p => ({ ...p, endTime: e.target.value }))} />
             </div>
           </div>
-          <div><Label>Alasan</Label>
-            <Textarea value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} rows={3} placeholder="Tuliskan alasan izin..." />
+          <div><Label>Alasan / Deskripsi</Label>
+            <Textarea value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} rows={3} placeholder="Tuliskan alasan/deskripsi izin..." />
           </div>
+
+          {/* Attachment upload */}
+          <div>
+            <Label className="text-xs text-muted-foreground">Lampiran (opsional — foto, PDF)</Label>
+            <div className="flex gap-2 mt-1">
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={() => cameraInputRef.current?.click()}>
+                <Camera className="h-3.5 w-3.5 mr-1" /> Kamera
+              </Button>
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={() => fileInputRef.current?.click()}>
+                <Paperclip className="h-3.5 w-3.5 mr-1" /> File
+              </Button>
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileSelect} />
+              <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={handleFileSelect} />
+            </div>
+            {attachment && (
+              <div className="mt-2 relative inline-block">
+                {attachment.type === 'application/pdf' ? (
+                  <div className="flex items-center gap-2 bg-blue-50 border rounded-lg p-2 pr-8">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                    <span className="text-xs truncate max-w-[150px]">{attachment.name}</span>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <img src={attachment.data} alt="Lampiran" className="max-h-24 rounded-lg border" />
+                  </div>
+                )}
+                <button onClick={() => setAttachment(null)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow">✕</button>
+              </div>
+            )}
+          </div>
+
           <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={handleSubmit} disabled={submitting}>
             {submitting ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
             {submitting ? 'Mengirim...' : 'Kirim Permohonan Izin'}
           </Button>
+          <p className="text-[10px] text-gray-400 text-center">Lampiran akan dihapus sistem setelah 3 bulan. Data izin tetap tersimpan. 📁</p>
         </CardContent>
       )}
     </Card>
@@ -116,6 +170,7 @@ function OrtuPermissionList({ studentId }: { studentId: string }) {
     `/api/permissions?studentId=${studentId}`, [studentId]
   )
   const permissions = permData?.permissions || []
+  const [previewAttach, setPreviewAttach] = useState<PermissionRecord | null>(null)
 
   if (loading) return <Skeleton className="h-32" />
   if (permissions.length === 0) return null
@@ -133,21 +188,45 @@ function OrtuPermissionList({ studentId }: { studentId: string }) {
         </div>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="max-h-64">
+        <div className="max-h-64 overflow-y-auto space-y-0">
           {permissions.map(p => (
-            <div key={p.id} className="flex items-center justify-between py-2 border-b last:border-0">
-              <div>
-                <p className="text-sm font-medium">{permissionTypeLabels[p.type] || p.type}</p>
-                <p className="text-xs text-muted-foreground">{formatDateShort(p.date)} • {p.reason}</p>
-                {p.startTime && p.endTime && <p className="text-xs text-muted-foreground">{p.startTime} - {p.endTime}</p>}
+            <div key={p.id} className="py-2 border-b last:border-0">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{permissionTypeLabels[p.type] || p.type}</p>
+                  <p className="text-xs text-muted-foreground">{formatDateShort(p.date)} • {p.reason}</p>
+                  {p.startTime && p.endTime && <p className="text-xs text-muted-foreground">{p.startTime} - {p.endTime}</p>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0 ml-2">
+                  {(p as any).attachmentData && (
+                    <button onClick={() => setPreviewAttach(p)} className="text-[10px] text-blue-600 hover:text-blue-800 underline">
+                      📎 Lampiran
+                    </button>
+                  )}
+                  <Badge className={p.status === 'APPROVED' ? 'bg-green-100 text-green-800' : p.status === 'REJECTED' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}>
+                    {permissionStatusLabels[p.status] || p.status}
+                  </Badge>
+                </div>
               </div>
-              <Badge className={p.status === 'APPROVED' ? 'bg-green-100 text-green-800' : p.status === 'REJECTED' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}>
-                {permissionStatusLabels[p.status] || p.status}
-              </Badge>
             </div>
           ))}
-        </ScrollArea>
+        </div>
       </CardContent>
+
+      {/* Attachment Preview Modal */}
+      {previewAttach && (previewAttach as any).attachmentData && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewAttach(null)}>
+          <div className="relative bg-white rounded-xl max-w-lg w-full max-h-[80vh] overflow-auto p-4" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setPreviewAttach(null)} className="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full w-8 h-8 flex items-center justify-center text-sm">✕</button>
+            <p className="font-medium text-sm mb-3">Lampiran: {(previewAttach as any).attachmentName || 'Dokumen'}</p>
+            {(previewAttach as any).attachmentType === 'application/pdf' ? (
+              <embed src={(previewAttach as any).attachmentData} type="application/pdf" className="w-full h-[60vh] rounded" />
+            ) : (
+              <img src={(previewAttach as any).attachmentData} alt="Lampiran" className="max-w-full rounded" />
+            )}
+          </div>
+        </div>
+      )}
     </Card>
   )
 }

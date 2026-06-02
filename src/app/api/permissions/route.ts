@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
-    const { studentId, type, reason, requestedBy, date, startTime, endTime } = body;
+    const { studentId, type, reason, requestedBy, date, startTime, endTime, attachmentData, attachmentType, attachmentName } = body;
 
     if (!studentId || !type || !reason || !requestedBy || !date) {
       return NextResponse.json(
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate type
-    const validTypes = ['LATE_ARRIVAL', 'EARLY_DEPARTURE', 'ABSENCE'];
+    const validTypes = ['LATE_ARRIVAL', 'EARLY_DEPARTURE', 'ABSENCE', 'SICK'];
     if (!validTypes.includes(type)) {
       return NextResponse.json({ error: 'Jenis izin tidak valid' }, { status: 400 });
     }
@@ -110,6 +110,9 @@ export async function POST(request: NextRequest) {
         startTime: startDateTime,
         endTime: endDateTime,
         status: 'PENDING',
+        attachmentData,
+        attachmentType,
+        attachmentName,
       },
       include: { student: { include: { class: true } } },
     });
