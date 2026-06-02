@@ -10,24 +10,27 @@ export async function POST(request: NextRequest) {
 
     // If force, delete all existing data first (order matters for FK constraints)
     if (force) {
-      await db.attendance.deleteMany();
-      await db.violation.deleteMany();
-      await db.goodDeed.deleteMany();
-      await db.behaviorAlert.deleteMany();
-      await db.permission.deleteMany();
-      await db.faceReference.deleteMany();
-      await db.dutySchedule.deleteMany();
-      await db.parent.deleteMany();
-      await db.student.deleteMany();
-      await db.teacher.deleteMany();
-      await db.class.deleteMany();
-      await db.academicYear.deleteMany();
-      await db.violationCategory.deleteMany();
-      await db.goodDeedCategory.deleteMany();
-      await db.geofenceConfig.deleteMany();
-      await db.scanSession.deleteMany();
-      await db.schoolConfig.deleteMany();
-      await db.user.deleteMany();
+      // Use raw SQL to bypass Prisma order issues
+      await db.$executeRawUnsafe(`DELETE FROM "DutySubstitute"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Attendance"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Violation"`);
+      await db.$executeRawUnsafe(`DELETE FROM "GoodDeed"`);
+      await db.$executeRawUnsafe(`DELETE FROM "BehaviorAlert"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Permission"`);
+      await db.$executeRawUnsafe(`DELETE FROM "FaceReference"`);
+      await db.$executeRawUnsafe(`DELETE FROM "DutySchedule"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Parent"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Student"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Teacher"`);
+      await db.$executeRawUnsafe(`DELETE FROM "Class"`);
+      await db.$executeRawUnsafe(`DELETE FROM "AcademicYear"`);
+      await db.$executeRawUnsafe(`DELETE FROM "ViolationCategory"`);
+      await db.$executeRawUnsafe(`DELETE FROM "GoodDeedCategory"`);
+      await db.$executeRawUnsafe(`DELETE FROM "GeofenceConfig"`);
+      await db.$executeRawUnsafe(`DELETE FROM "ScanSession"`);
+      await db.$executeRawUnsafe(`DELETE FROM "SchoolConfig"`);
+      await db.$executeRawUnsafe(`DELETE FROM "SchoolDocument"`);
+      await db.$executeRawUnsafe(`DELETE FROM "User"`);
     } else {
       // Check if already seeded
       const existingUsers = await db.user.count();
