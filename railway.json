@@ -6,7 +6,6 @@
   },
   "deploy": {
     "startCommand": "sh start.sh",
-    "preDeployCommand": "npx prisma db push --force-reset 2>&1",
     "healthcheckPath": "/",
     "port": 3000,
     "restartPolicyType": "ON_FAILURE"
