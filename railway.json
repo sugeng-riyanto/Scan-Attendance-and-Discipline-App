@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "sh start.sh",
-    "preDeployCommand": "npx prisma migrate deploy",
+    "preDeployCommand": "echo 'DELETE FROM \"DutySchedule\";' | npx prisma db execute --stdin 2>/dev/null; npx prisma db push",
     "healthcheckPath": "/",
     "port": 3000,
     "restartPolicyType": "ON_FAILURE"
