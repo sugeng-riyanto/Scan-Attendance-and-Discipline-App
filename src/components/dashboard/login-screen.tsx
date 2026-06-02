@@ -20,8 +20,13 @@ export function LoginScreen({ schoolConfig, themeColor }: { schoolConfig: School
   const [loading, setLoading] = useState(false)
   const [setupLoading, setSetupLoading] = useState(false)
   const [setupDone, setSetupDone] = useState(false)
+  const roleConfigKey: Record<string, string> = {
+    ADMIN: 'admin', KEPALA_SEKOLAH: 'kepsek', VP_KESISWAAN: 'vpkes',
+    WALI_KELAS: 'walikelas', GURU: 'guru', GURU_JAGA: 'gurujaga',
+    ORANG_TUA: 'ortu', SISWA: 'siswa',
+  }
   const visibleDemoCreds = DEMO_CREDS.filter(d => {
-    const configKey = `demo_show_${d.role.toLowerCase()}`
+    const configKey = `demo_show_${roleConfigKey[d.role] || d.role.toLowerCase()}`
     return (schoolConfig as any)[configKey] !== 'false'
   })
 

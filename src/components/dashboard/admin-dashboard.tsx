@@ -19,6 +19,12 @@ import { apiFetch } from '@/lib/api-fetch'
 import { DEMO_CREDS } from '@/lib/types'
 import { ScanSessionToggle } from './scan-session-toggle'
 
+const ROLE_CONFIG_KEY: Record<string, string> = {
+  ADMIN: 'admin', KEPALA_SEKOLAH: 'kepsek', VP_KESISWAAN: 'vpkes',
+  WALI_KELAS: 'walikelas', GURU: 'guru', GURU_JAGA: 'gurujaga',
+  ORANG_TUA: 'ortu', SISWA: 'siswa',
+}
+
 function DemoLoginToggles() {
   const [toggles, setToggles] = React.useState<Record<string, boolean>>({})
   const [loading, setLoading] = React.useState(true)
@@ -29,7 +35,7 @@ function DemoLoginToggles() {
       .then((data: { configs: { key: string; value: string }[] }) => {
         const map: Record<string, boolean> = {}
         DEMO_CREDS.forEach(d => {
-          const key = `demo_show_${d.role.toLowerCase()}`
+          const key = `demo_show_${ROLE_CONFIG_KEY[d.role] || d.role.toLowerCase()}`
           const cfg = data.configs.find(c => c.key === key)
           map[d.role] = cfg ? cfg.value !== 'false' : true
         })
@@ -41,7 +47,7 @@ function DemoLoginToggles() {
 
   const handleToggle = async (role: string, checked: boolean) => {
     setToggles(prev => ({ ...prev, [role]: checked }))
-    const key = `demo_show_${role.toLowerCase()}`
+    const key = `demo_show_${ROLE_CONFIG_KEY[role] || role.toLowerCase()}`
     try {
       await fetch('/api/school-config', {
         method: 'POST',
