@@ -14,10 +14,13 @@
 
 */
 -- DropForeignKey
-ALTER TABLE "DutySchedule" DROP CONSTRAINT "DutySchedule_classId_fkey";
+ALTER TABLE "DutySchedule" DROP CONSTRAINT IF EXISTS "DutySchedule_classId_fkey";
 
 -- DropForeignKey
-ALTER TABLE "DutySchedule" DROP CONSTRAINT "DutySchedule_userId_fkey";
+ALTER TABLE "DutySchedule" DROP CONSTRAINT IF EXISTS "DutySchedule_userId_fkey";
+
+-- Clear existing rows so NOT NULL columns can be added
+DELETE FROM "DutySchedule";
 
 -- AlterTable
 ALTER TABLE "DutySchedule" DROP COLUMN "classId",
