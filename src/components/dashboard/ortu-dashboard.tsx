@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { useAuthStore } from '@/lib/stores/auth-store'
 import { useAppStore } from '@/lib/stores/app-store'
 import { formatTimeWIB, formatDateShort, getStatusColor, getBehaviorLevel, permissionTypeLabels, permissionStatusLabels } from '@/lib/attendance-utils'
