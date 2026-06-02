@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuthStore, AuthUser } from '@/lib/stores/auth-store'
 import { useAppStore, AppPage } from '@/lib/stores/app-store'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,15 +20,29 @@ export function LoginScreen({ schoolConfig, themeColor }: { schoolConfig: School
   const [loading, setLoading] = useState(false)
   const [setupLoading, setSetupLoading] = useState(false)
   const [setupDone, setSetupDone] = useState(false)
+  const [demoConfig, setDemoConfig] = useState<Record<string, boolean>>({})
   const roleConfigKey: Record<string, string> = {
     ADMIN: 'admin', KEPALA_SEKOLAH: 'kepsek', VP_KESISWAAN: 'vpkes',
     WALI_KELAS: 'walikelas', GURU: 'guru', GURU_JAGA: 'gurujaga',
     ORANG_TUA: 'ortu', SISWA: 'siswa',
   }
-  const visibleDemoCreds = DEMO_CREDS.filter(d => {
-    const configKey = `demo_show_${roleConfigKey[d.role] || d.role.toLowerCase()}`
-    return (schoolConfig as any)[configKey] !== 'false'
-  })
+
+  useEffect(() => {
+    fetch('/api/school-config')
+      .then(r => r.json())
+      .then((data: { configs: { key: string; value: string }[] }) => {
+        const map: Record<string, boolean> = {}
+        DEMO_CREDS.forEach(d => {
+          const key = `demo_show_${roleConfigKey[d.role] || d.role.toLowerCase()}`
+          const cfg = data.configs.find(c => c.key === key)
+          map[d.role] = cfg ? cfg.value !== 'false' : true
+        })
+        setDemoConfig(map)
+      })
+      .catch(() => setDemoConfig({}))
+  }, [])
+
+  const visibleDemoCreds = DEMO_CREDS.filter(d => demoConfig[d.role] !== false)
 
   const handleLogin = async (u?: string, p?: string) => {
     const un = u || username
