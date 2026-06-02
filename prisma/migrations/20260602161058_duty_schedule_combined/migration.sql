@@ -1,18 +1,6 @@
-/*
-  Warnings:
+﻿-- Clean existing data first so NOT NULL columns can be added
+DELETE FROM "DutySchedule";
 
-  - You are about to drop the column `classId` on the `DutySchedule` table. All the data in the column will be lost.
-  - You are about to drop the column `date` on the `DutySchedule` table. All the data in the column will be lost.
-  - You are about to drop the column `notes` on the `DutySchedule` table. All the data in the column will be lost.
-  - You are about to drop the column `shift` on the `DutySchedule` table. All the data in the column will be lost.
-  - You are about to drop the column `userId` on the `DutySchedule` table. All the data in the column will be lost.
-  - Added the required column `dayOfWeek` to the `DutySchedule` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `endTime` to the `DutySchedule` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `location` to the `DutySchedule` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `startTime` to the `DutySchedule` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `teacherId` to the `DutySchedule` table without a default value. This is not possible if the table is not empty.
-
-*/
 -- DropForeignKey
 ALTER TABLE "DutySchedule" DROP CONSTRAINT "DutySchedule_classId_fkey";
 
@@ -42,7 +30,6 @@ CREATE TABLE "DutySubstitute" (
     "substituteDate" DATE NOT NULL,
     "reason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
     CONSTRAINT "DutySubstitute_pkey" PRIMARY KEY ("id")
 );
 
