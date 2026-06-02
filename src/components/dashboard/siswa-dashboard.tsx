@@ -538,7 +538,7 @@ export function SiswaDashboard() {
         </div>
       </div>
 
-            {showIdCard && (
+            {showIdCard && me.idCardVisibleToStudent !== false && (
         <div className="space-y-3">
           <div className="flex justify-center">
             <div id="student-id-card-dash" className="rounded-2xl overflow-hidden shadow-xl border-2 w-full max-w-sm sm:max-w-md mx-auto" style={{ borderColor: themeColor + '40' }}>

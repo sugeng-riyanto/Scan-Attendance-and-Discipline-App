@@ -77,6 +77,8 @@ model Student {
   totalViolationPoints Int      @default(0)
   totalGoodPoints      Int      @default(0)
   faceCaptureEnabled   Boolean  @default(true)
+  idCardVisibleToStudent Boolean @default(true)
+  idCardVisibleToParent  Boolean @default(true)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

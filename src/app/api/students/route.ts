@@ -145,7 +145,7 @@ export async function PUT(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
     // Filter out fields that shouldn't be updated directly
-    const allowedFields = ['nisn', 'name', 'classId', 'academicYearId', 'gender', 'qrCode', 'photoBase64', 'address', 'email', 'phone', 'status', 'photoUrl', 'totalViolationPoints', 'totalGoodPoints', 'faceCaptureEnabled'];
+    const allowedFields = ['nisn', 'name', 'classId', 'academicYearId', 'gender', 'qrCode', 'photoBase64', 'address', 'email', 'phone', 'status', 'photoUrl', 'totalViolationPoints', 'totalGoodPoints', 'faceCaptureEnabled', 'idCardVisibleToStudent', 'idCardVisibleToParent'];
     const updateData: any = {};
     for (const key of allowedFields) {
       if (data[key] !== undefined) {

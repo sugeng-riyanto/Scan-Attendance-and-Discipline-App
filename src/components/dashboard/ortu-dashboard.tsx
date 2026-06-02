@@ -332,16 +332,28 @@ export function OrtuDashboard() {
           </div>
 
           {/* ID Card */}
-          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActivePage('id-card')}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-100"><CreditCard className="h-6 w-6 text-emerald-600" /></div>
-              <div className="flex-1">
-                <p className="font-semibold">Kartu Identitas Siswa</p>
-                <p className="text-xs text-muted-foreground">Lihat dan download ID Card {myChild.name} (SVG/PDF)</p>
-              </div>
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"><Eye className="h-4 w-4 mr-1" /> Lihat</Button>
-            </CardContent>
-          </Card>
+          {myChild.idCardVisibleToParent !== false ? (
+            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActivePage('id-card')}>
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-emerald-100"><CreditCard className="h-6 w-6 text-emerald-600" /></div>
+                <div className="flex-1">
+                  <p className="font-semibold">Kartu Identitas Siswa</p>
+                  <p className="text-xs text-muted-foreground">Lihat dan download ID Card {myChild.name} (SVG/PDF)</p>
+                </div>
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"><Eye className="h-4 w-4 mr-1" /> Lihat</Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="bg-gray-50">
+              <CardContent className="p-4 flex items-center gap-3 opacity-60">
+                <div className="p-2 rounded-lg bg-gray-200"><CreditCard className="h-6 w-6 text-gray-400" /></div>
+                <div className="flex-1">
+                  <p className="font-semibold text-gray-500">Kartu Identitas Siswa</p>
+                  <p className="text-xs text-gray-400">ID Card tidak tersedia saat ini.</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <DisciplinePatternChart violations={violData?.violations || []} goodDeeds={goodData?.goodDeeds || []} title="Pola Kedisiplinan Anak" />
 

@@ -391,12 +391,12 @@ async function captureCardDirectly(elementId: string): Promise<string | null> {
 
 // ── Siswa: single card with download ──────────────────────────────
 
-function StudentSingleCardView() {
+function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } = {}) {
   const schoolConfig = useSchoolConfig()
   const themeColor = schoolConfig.theme_color || '#10b981'
   const { user } = useAuthStore()
   const { data: studentsData, loading: sLoad } = useApiFetch<{ students: Student[]; total: number }>('/api/students?limit=500')
-  const me = studentsData?.students?.find(s => s.user?.id === user?.id) || studentsData?.students?.find(s => s.nisn === user?.username)
+  const me = initialStudent || studentsData?.students?.find(s => s.user?.id === user?.id) || studentsData?.students?.find(s => s.nisn === user?.username)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
 
@@ -417,6 +417,9 @@ function StudentSingleCardView() {
       </CardContent></Card>
     </div>
   )
+  // Check visibility for students
+  if (user?.role === 'SISWA' && me.idCardVisibleToStudent === false)
+    return <div className="text-center py-12 text-gray-400"><p>Kartu ID tidak tersedia. Hubungi admin.</p></div>
 
   const handleDownloadSvg = () => {
     const ok = downloadSvg('student-id-card', `ID-Card-${me.nisn}.svg`)
@@ -517,6 +520,20 @@ function BatchIdCardView() {
       toast.success(`Foto ${student.name} berhasil diupload`)
       refetchStudents()
     } catch { toast.error(`Gagal upload foto ${student.name}`) } finally { setUploading(null) }
+  }
+
+  const handleToggleIdCardVisibility = async (student: Student, target: 'student' | 'parent') => {
+    const field = target === 'student' ? 'idCardVisibleToStudent' : 'idCardVisibleToParent'
+    const newVal = !(target === 'student' ? student.idCardVisibleToStudent : student.idCardVisibleToParent)
+    try {
+      await apiFetch('/api/students', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: student.id, [field]: newVal }),
+      })
+      toast.success(`ID Card ${newVal ? 'ditampilkan' : 'disembunyikan'} untuk ${target === 'student' ? 'Siswa' : 'Orang Tua'} (${student.name})`)
+      refetchStudents()
+    } catch { toast.error('Gagal mengubah visibilitas ID Card') }
   }
 
   const handleToggleFaceCapture = async (student: Student) => {
@@ -672,11 +689,13 @@ function BatchIdCardView() {
         </CardContent>
       </Card>
 
-      {/* Face capture toggle info */}
-      <div className="text-xs text-gray-500 flex items-center gap-3 px-1">
-        <span>Referensi Wajah per siswa:</span>
-        <span className="inline-flex items-center gap-1 text-emerald-600"><span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 font-medium">✓ Wajah</span> Aktif</span>
-        <span className="inline-flex items-center gap-1 text-gray-400"><span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100">✗ Wajah</span> Nonaktif</span>
+      {/* Toggle info */}
+      <div className="text-xs text-gray-500 flex items-center gap-3 px-1 flex-wrap">
+        <span className="font-medium">Pengaturan tampilan:</span>
+        <span className="inline-flex items-center gap-1 text-emerald-600"><span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 font-medium">✓ Wajah</span></span>
+        <span className="inline-flex items-center gap-1 text-gray-400"><span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100">✗ Wajah</span></span>
+        <span className="text-blue-700"><span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 font-medium">◉ Siswa</span> ID Card utk siswa</span>
+        <span className="text-purple-700"><span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 font-medium">◉ Ortu</span> ID Card utk ortu</span>
       </div>
 
       {/* Student list */}
@@ -710,6 +729,16 @@ function BatchIdCardView() {
                   className={`text-[10px] px-2 py-1 rounded-md shrink-0 font-medium whitespace-nowrap ${student.faceCaptureEnabled !== false ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
                   title={student.faceCaptureEnabled !== false ? 'Klik nonaktifkan face capture' : 'Klik aktifkan face capture'}>
                   {student.faceCaptureEnabled !== false ? '✓ Wajah' : '✗ Wajah'}
+                </button>
+                <button onClick={e => { e.stopPropagation(); handleToggleIdCardVisibility(student, 'student') }}
+                  className={`text-[10px] px-1.5 py-1 rounded-md shrink-0 font-medium whitespace-nowrap ${student.idCardVisibleToStudent !== false ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}
+                  title={student.idCardVisibleToStudent !== false ? 'ID Card tampil di siswa - klik sembunyikan' : 'ID Card disembunyikan dari siswa - klik tampilkan'}>
+                  {student.idCardVisibleToStudent !== false ? '◉ Siswa' : '○ Siswa'}
+                </button>
+                <button onClick={e => { e.stopPropagation(); handleToggleIdCardVisibility(student, 'parent') }}
+                  className={`text-[10px] px-1.5 py-1 rounded-md shrink-0 font-medium whitespace-nowrap ${student.idCardVisibleToParent !== false ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-400'}`}
+                  title={student.idCardVisibleToParent !== false ? 'ID Card tampil di orang tua - klik sembunyikan' : 'ID Card disembunyikan dari orang tua - klik tampilkan'}>
+                  {student.idCardVisibleToParent !== false ? '◉ Ortu' : '○ Ortu'}
                 </button>
               </div>
             </CardContent>
@@ -772,6 +801,20 @@ function BatchIdCardView() {
 
 export function IdCardPage() {
   const { user } = useAuthStore()
+  const { data: studentsData } = useApiFetch<{ students: Student[] }>('/api/students?limit=500')
   const isStaff = user && ['ADMIN', 'WALI_KELAS', 'VP_KESISWAAN', 'GURU', 'KEPALA_SEKOLAH', 'GURU_JAGA'].includes(user.role)
-  return isStaff ? <BatchIdCardView /> : <StudentSingleCardView />
+  const isParent = user?.role === 'ORANG_TUA'
+
+  if (isStaff) return <BatchIdCardView />
+
+  // For parents: find their child
+  if (isParent) {
+    const child = studentsData?.students?.find(s => s.parents?.some(p => p.user.id === user?.id))
+    if (!child) return <div className="text-center py-12 text-gray-400"><p>Data anak tidak ditemukan</p></div>
+    if (child.idCardVisibleToParent === false) return <div className="text-center py-12 text-gray-400"><p>Kartu ID siswa tidak tersedia untuk orang tua.</p></div>
+    return <StudentSingleCardView initialStudent={child} />
+  }
+
+  // For students
+  return <StudentSingleCardView />
 }

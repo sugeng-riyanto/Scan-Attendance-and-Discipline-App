@@ -2,6 +2,7 @@ export interface Student {
   id: string; nisn: string; name: string; classId: string; qrCode: string;
   photoUrl?: string; gender?: string; totalViolationPoints: number; totalGoodPoints: number;
   address?: string; email?: string; phone?: string;   status?: string; photoBase64?: string; faceCaptureEnabled?: boolean;
+  idCardVisibleToStudent?: boolean; idCardVisibleToParent?: boolean;
   class?: { id: string; name: string; level: string; academicYear?: { id: string; name: string } };
   user?: { id: string; username: string; name: string; role: string };
   parents?: { id: string; relationship: string; user: { id: string; name: string } }[];
