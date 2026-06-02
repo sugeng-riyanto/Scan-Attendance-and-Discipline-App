@@ -447,13 +447,23 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
         </Button>
       </div>
 
-      {/* Fullscreen overlay */}
+      {/* Fullscreen overlay — responsive for mobile, tablet, desktop */}
       {fullscreenId && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setFullscreenId(null)}>
-          <div className="relative max-w-3xl w-full" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setFullscreenId(null)} className="absolute -top-10 right-0 text-white text-sm hover:text-gray-300 z-10">✕ Tutup</button>
-            <div className="bg-white rounded-2xl overflow-hidden shadow-2xl p-4 sm:p-8">
-              <IdCardFace student={me} qrDataUrl={qrDataUrl} schoolConfig={schoolConfig} themeColor={themeColor} />
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center sm:p-4" onClick={() => setFullscreenId(null)}>
+          <div className="relative w-full h-full sm:w-auto sm:h-auto sm:max-w-2xl sm:mx-auto" onClick={e => e.stopPropagation()}>
+            {/* Close button — always visible, positioned for touch */}
+            <button onClick={() => setFullscreenId(null)}
+              className="absolute top-3 right-3 z-20 bg-white/20 backdrop-blur hover:bg-white/40 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg text-sm font-medium sm:top-0 sm:-top-10 sm:right-0 sm:bg-transparent sm:backdrop-blur-none sm:hover:text-gray-300">
+              ✕
+            </button>
+            {/* Card container — scrollable on small landscape */}
+            <div className="h-full w-full sm:h-auto overflow-y-auto flex items-center justify-center p-3 sm:p-0">
+              <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-[95vw] sm:max-w-md sm:p-4 md:p-6"
+                style={{ maxHeight: '85vh' }}>
+                <div className="scale-[0.85] sm:scale-100 origin-top">
+                  <IdCardFace student={me} qrDataUrl={qrDataUrl} schoolConfig={schoolConfig} themeColor={themeColor} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
