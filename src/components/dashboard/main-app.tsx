@@ -142,7 +142,7 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
 
       <div className="lg:pl-64">
         <HeaderBar schoolConfig={schoolConfig} themeColor={themeColor} />
-        <SubscriptionBanner />
+        {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'KEPALA_SEKOLAH') && <SubscriptionBanner />}
         <PreviewBanner />
         <main className="p-4 pb-20 lg:pb-4 min-h-[calc(100vh-3.5rem)]">
           <ErrorBoundary key={activePage}>
