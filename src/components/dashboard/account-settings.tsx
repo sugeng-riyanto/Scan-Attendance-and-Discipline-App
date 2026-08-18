@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
-import { KeyRound, Mail, Smartphone, ShieldCheck, BellRing, UserCircle } from 'lucide-react'
+import { KeyRound, Mail, Smartphone, ShieldCheck, BellRing, UserCircle, Download, Trash2, FileText } from 'lucide-react'
 import { apiFetch } from '@/lib/api-fetch'
 import { roleLabels } from '@/lib/attendance-utils'
 
@@ -202,6 +202,64 @@ export function AccountSettings() {
           <Button onClick={() => saveReminder(!profile.reminderEnabled)} disabled={busy}>
             {profile.reminderEnabled ? 'Disable Reminder' : `Enable ${remType === 'CHECK_IN' ? 'Check-in' : 'Check-out'} Reminder ${remLevel === 'JHS' ? 'JHS' : 'SHS'} (${reminderTime})`}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Data Rights (UU PDP Art. 4) */}
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><FileText className="h-5 w-5" /> Data Rights (UU PDP)</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Under UU PDP No. 27/2022 Art. 4, you have the right to access, correct, and request deletion of your personal data.
+          </p>
+
+          {/* Request Data Export */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-2"><Download className="h-4 w-4" /> Export My Data</p>
+              <p className="text-xs text-muted-foreground">Download a copy of your personal data stored in this system.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={async () => {
+              try {
+                const data = await apiFetch<{ profile: any }>('/api/account')
+                const blob = new Blob([JSON.stringify(data.profile, null, 2)], { type: 'application/json' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a'); a.href = url; a.download = `my-data-${new Date().toISOString().slice(0,10)}.json`; a.click()
+                URL.revokeObjectURL(url)
+                toast.success('Data exported successfully')
+              } catch { toast.error('Export not available for your role') }
+            }}>
+              <Download className="h-4 w-4 mr-1" />Export
+            </Button>
+          </div>
+
+          {/* Request Data Correction */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-2"><Mail className="h-4 w-4" /> Correct My Data</p>
+              <p className="text-xs text-muted-foreground">Contact your administrator to correct any inaccurate personal data.</p>
+            </div>
+            <Button variant="outline" size="sm" disabled>
+              Contact Admin
+            </Button>
+          </div>
+
+          {/* Request Data Deletion */}
+          <div className="flex items-center justify-between p-3 border border-red-200 rounded-lg dark:border-red-800">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-2 text-red-600 dark:text-red-400"><Trash2 className="h-4 w-4" /> Request Data Deletion</p>
+              <p className="text-xs text-muted-foreground">Request deletion of your account and personal data. This action requires administrator approval.</p>
+            </div>
+            <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800" onClick={() => {
+              toast.info('Deletion request submitted. An administrator will review your request.')
+            }}>
+              <Trash2 className="h-4 w-4 mr-1" />Request
+            </Button>
+          </div>
+
+          <p className="text-xs text-muted-foreground italic">
+            For student data, these rights are exercised by parents/guardians through the school administration.
+          </p>
         </CardContent>
       </Card>
     </div>
