@@ -221,13 +221,14 @@ export function AccountSettings() {
             </div>
             <Button variant="outline" size="sm" onClick={async () => {
               try {
+                await apiFetch('/api/data-rights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'EXPORT', details: 'User requested personal data export' }) })
                 const data = await apiFetch<{ profile: any }>('/api/account')
                 const blob = new Blob([JSON.stringify(data.profile, null, 2)], { type: 'application/json' })
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a'); a.href = url; a.download = `my-data-${new Date().toISOString().slice(0,10)}.json`; a.click()
                 URL.revokeObjectURL(url)
-                toast.success('Data exported successfully')
-              } catch { toast.error('Export not available for your role') }
+                toast.success('Data exported and request logged')
+              } catch { toast.error('Export not available') }
             }}>
               <Download className="h-4 w-4 mr-1" />Export
             </Button>
@@ -239,9 +240,12 @@ export function AccountSettings() {
               <p className="text-sm font-medium flex items-center gap-2"><Mail className="h-4 w-4" /> Correct My Data</p>
               <p className="text-xs text-muted-foreground">Contact your administrator to correct any inaccurate personal data.</p>
             </div>
-            <Button variant="outline" size="sm" disabled>
-              Contact Admin
-            </Button>
+            <Button variant="outline" size="sm" onClick={async () => {
+              try {
+                await apiFetch('/api/data-rights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'CORRECTION', details: 'User requests data correction — please contact admin with details' }) })
+                toast.success('Correction request submitted. Admin will contact you.')
+              } catch { toast.error('Failed to submit request') }
+            }}>Request</Button>
           </div>
 
           {/* Request Data Deletion */}
@@ -250,8 +254,11 @@ export function AccountSettings() {
               <p className="text-sm font-medium flex items-center gap-2 text-red-600 dark:text-red-400"><Trash2 className="h-4 w-4" /> Request Data Deletion</p>
               <p className="text-xs text-muted-foreground">Request deletion of your account and personal data. This action requires administrator approval.</p>
             </div>
-            <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800" onClick={() => {
-              toast.info('Deletion request submitted. An administrator will review your request.')
+            <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800" onClick={async () => {
+              try {
+                await apiFetch('/api/data-rights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'DELETION', details: 'User requests account and data deletion per UU PDP Art. 4' }) })
+                toast.success('Deletion request submitted. Admin will review.')
+              } catch { toast.error('Failed to submit request') }
             }}>
               <Trash2 className="h-4 w-4 mr-1" />Request
             </Button>
