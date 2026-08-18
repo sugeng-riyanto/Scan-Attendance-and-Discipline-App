@@ -14,7 +14,6 @@ import { GraduationCap, Lock, RefreshCw, Database, QrCode, ClipboardList, Search
 import { Badge } from '@/components/ui/badge'
 import { SchoolLandingProfile } from '@/components/dashboard/school-landing-profile'
 import { toast } from 'sonner'
-import { useTheme } from 'next-themes'
 import { apiFetch } from '@/lib/api-fetch'
 import { SchoolConfigType, DEMO_CREDS } from '@/lib/types'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -88,14 +87,7 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
   const [search, setSearch] = useState('')
   const [levelFilter, setLevelFilter] = useState<'ALL' | 'JHS' | 'SHS'>('ALL')
   const { login } = useAuthStore()
-  const { resolvedTheme } = useTheme()
-  // next-themes can't know the theme during SSR, so `resolvedTheme` is undefined
-  // on the server but resolved on the client's first render — using it directly
-  // in a style prop would mismatch between server HTML and client hydration.
-  // Gate the themed background behind a mounted flag so both renders agree
-  // (no gradient server-side; it fades in after mount once the theme is known).
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [pinMode, setPinMode] = useState(false)
@@ -280,7 +272,7 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 dark:bg-gray-950" style={!mounted || resolvedTheme === 'dark' ? undefined : { background: `linear-gradient(to bottom right, ${displayTheme}10, ${displayTheme}20)` }} suppressHydrationWarning>
+    <div className="min-h-screen flex items-center justify-center p-4 dark:bg-gray-950 login-bg">
       <div className="fixed top-4 right-4">
         <ThemeToggle />
       </div>
