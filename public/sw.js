@@ -1,88 +1,129 @@
-const CACHE_NAME = 'attendance-v1';
-const STATIC_CACHE = 'attendance-static-v1';
-const DYNAMIC_CACHE = 'attendance-dynamic-v1';
+const CACHE_VERSION = 'v2';
+const STATIC_CACHE = `attendance-static-${CACHE_VERSION}`;
+const DYNAMIC_CACHE = `attendance-dynamic-${CACHE_VERSION}`;
+const API_CACHE = `attendance-api-${CACHE_VERSION}`;
 
-// Assets to pre-cache
-const STATIC_ASSETS = [
+// All app pages to pre-cache for offline access
+const APP_PAGES = [
   '/',
+  '/scan',
+  '/terms',
   '/offline',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/s/SHB-001',
+  '/s/SMPN-01',
+  '/s/SMA-INS',
 ];
 
-// Install event - pre-cache static assets
+// Static assets to pre-cache
+const STATIC_ASSETS = [
+  '/manifest.json',
+  '/icon-192.svg',
+  '/offline.html',
+];
+
+// API endpoints to cache (GET only)
+const CACHEABLE_APIS = [
+  '/api/school-config',
+  '/api/schools/public',
+  '/api/scan-session',
+  '/api/terms',
+];
+
+// Install - pre-cache critical assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    })
+    Promise.all([
+      caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS)),
+      caches.open(DYNAMIC_CACHE).then((cache) => cache.addAll(APP_PAGES)),
+    ])
   );
   self.skipWaiting();
 });
 
-// Activate event - clean old caches
+// Activate - clean old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
+    caches.keys().then((keys) =>
+      Promise.all(
         keys
-          .filter((key) => key !== STATIC_CACHE && key !== DYNAMIC_CACHE)
+          .filter((key) => !key.includes(CACHE_VERSION))
           .map((key) => caches.delete(key))
-      );
-    })
+      )
+    )
   );
   self.clients.claim();
 });
 
-// Fetch event - network first, fallback to cache
+// Fetch strategy
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests
+  // Skip non-GET for caching
   if (request.method !== 'GET') return;
 
-  // Skip API calls (always go to network)
-  if (url.pathname.startsWith('/api/')) return;
+  // Skip socket.io and HMR
+  if (url.pathname.includes('/socket.io/') || url.pathname.includes('/_next/')) return;
 
-  // Skip socket.io
-  if (url.pathname.includes('/socket.io/')) return;
+  // API requests - network first, cache fallback
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(networkFirstStrategy(request, API_CACHE));
+    return;
+  }
 
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        // Clone the response before caching
-        const responseClone = response.clone();
-        caches.open(DYNAMIC_CACHE).then((cache) => {
-          cache.put(request, responseClone);
-        });
-        return response;
-      })
-      .catch(() => {
-        // Network failed, try cache
-        return caches.match(request).then((cached) => {
-          if (cached) return cached;
+  // Navigation requests - cache first for offline
+  if (request.mode === 'navigate') {
+    event.respondWith(cacheFirstStrategy(request, DYNAMIC_CACHE));
+    return;
+  }
 
-          // Return offline page for navigation requests
-          if (request.mode === 'navigate') {
-            return caches.match('/offline');
-          }
-
-          return new Response('Offline', { status: 503 });
-        });
-      })
-  );
+  // Static assets - cache first
+  event.respondWith(cacheFirstStrategy(request, STATIC_CACHE));
 });
+
+// Cache-first strategy (for offline support)
+async function cacheFirstStrategy(request, cacheName) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return caches.match('/offline');
+  }
+}
+
+// Network-first strategy (for fresh data)
+async function networkFirstStrategy(request, cacheName) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    return cached || new Response(JSON.stringify({ error: 'Offline' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
 
 // Background sync for offline attendance submissions
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-attendance') {
-    event.waitUntil(syncAttendance());
+    event.waitUntil(syncPendingActions());
   }
 });
 
-async function syncAttendance() {
+async function syncPendingActions() {
   const cache = await caches.open('attendance-queue');
   const requests = await cache.keys();
 
@@ -104,44 +145,34 @@ async function syncAttendance() {
   }
 }
 
-// Push notification handler
+// Push notifications
 self.addEventListener('push', (event) => {
   const data = event.data?.json() || {
     title: 'Attendance App',
     body: 'New notification',
-    icon: '/icon-192.png',
   };
 
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: data.icon || '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/icon-192.svg',
+      badge: '/icon-192.svg',
       vibrate: [100, 50, 100],
       data: data.url || '/',
-      actions: [
-        { action: 'open', title: 'Open', icon: '/icon-192.png' },
-        { action: 'dismiss', title: 'Dismiss' },
-      ],
     })
   );
 });
 
-// Notification click handler
+// Notification click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
-  if (event.action === 'dismiss') return;
-
   event.waitUntil(
     clients.matchAll({ type: 'window' }).then((clientList) => {
-      // Focus existing window if open
       for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
           return client.focus();
         }
       }
-      // Open new window
       return clients.openWindow(event.notification.data || '/');
     })
   );

@@ -16,6 +16,7 @@ import { Bell, LogOut, Wifi, WifiOff, RefreshCw, GraduationCap, Upload, Save, Us
 import { toast } from 'sonner'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { SchoolSwitcher } from './school-switcher'
+import { RoleSwitcher } from './role-switcher'
 import { usePreviewStore } from '@/lib/stores/preview-store'
 
 export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolConfigType; themeColor: string }) {
@@ -130,6 +131,8 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
         <div className="flex items-center gap-2">
           {/* SUPER_ADMIN school preview switcher */}
           <SchoolSwitcher />
+          {/* Quick role switcher for Super Admin */}
+          <RoleSwitcher />
           {/* Online/Offline Indicator */}
           <div className="flex items-center gap-1">
             {isOnline ? (
