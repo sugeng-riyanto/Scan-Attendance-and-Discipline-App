@@ -1,11 +1,16 @@
 'use client'
 
 import React, { useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { useAuthStore } from '@/lib/stores/auth-store'
 import { useSchoolConfig } from './hooks/use-school-config'
-import { LoginScreen } from './login-screen'
 import { MainApp } from './main-app'
 import { Toaster as SonnerToaster } from '@/components/ui/sonner'
+
+// Dynamic import with ssr: false to prevent hydration mismatch.
+// LoginScreen fetches data on mount (school list, cookie resolution),
+// which produces different server/client HTML.
+const LoginScreen = dynamic(() => import('./login-screen').then(m => ({ default: m.LoginScreen })), { ssr: false })
 
 export default function SchoolApp({ initialSchoolCode }: { initialSchoolCode?: string }) {
   const { isAuthenticated, user } = useAuthStore()
@@ -36,7 +41,7 @@ export default function SchoolApp({ initialSchoolCode }: { initialSchoolCode?: s
   // without this the login screen's toasts (T&C gate, login errors, setup
   // feedback) would be silent no-ops.
   return (
-    <div style={{ ['--theme-color' as string]: themeColor }} suppressHydrationWarning>
+    <div style={{ ['--theme-color' as string]: themeColor }}>
       {isAuthenticated ? (
         <MainApp schoolConfig={brandedConfig} themeColor={themeColor} />
       ) : (
