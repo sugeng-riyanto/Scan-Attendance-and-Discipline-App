@@ -280,7 +280,7 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 dark:bg-gray-950" style={!mounted || resolvedTheme === 'dark' ? undefined : { background: `linear-gradient(to bottom right, ${displayTheme}10, ${displayTheme}20)` }}>
+    <div className="min-h-screen flex items-center justify-center p-4 dark:bg-gray-950" style={!mounted || resolvedTheme === 'dark' ? undefined : { background: `linear-gradient(to bottom right, ${displayTheme}10, ${displayTheme}20)` }} suppressHydrationWarning>
       <div className="fixed top-4 right-4">
         <ThemeToggle />
       </div>
