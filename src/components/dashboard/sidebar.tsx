@@ -13,10 +13,11 @@ export function Sidebar({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
   const { activePage, setActivePage, sidebarOpen, setSidebarOpen } = useAppStore()
   if (!user) return null
 
-  const items = NAV_ITEMS.filter(n => n.roles.includes(user.role))
+  // SUPER_ADMIN can access EVERY role's pages plus its own Super Admin menu.
+  const items = NAV_ITEMS.filter(n => user.role === 'SUPER_ADMIN' || n.roles.includes(user.role))
 
   return (
-    <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r transform transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+    <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r transform transition-transform duration-200 lg:translate-x-0 dark:bg-gray-900 dark:border-gray-800 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="flex items-center justify-between h-14 px-4 border-b">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-full text-white" style={{ backgroundColor: themeColor }}>
@@ -37,7 +38,7 @@ export function Sidebar({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
           {items.map(item => (
             <button key={item.id}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                activePage === item.id ? 'font-semibold' : 'text-gray-600 hover:bg-gray-50'
+                activePage === item.id ? 'font-semibold' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
               }`}
               style={activePage === item.id ? { backgroundColor: themeColor + '15', color: themeColor } : {}}
               onClick={() => { if (item.id === 'discipline-scan') { window.location.href = '/scan-discipline'; return } setActivePage(item.id); setSidebarOpen(false) }}>

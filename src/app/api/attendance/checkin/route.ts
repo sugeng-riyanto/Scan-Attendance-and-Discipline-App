@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { determineCheckInStatus, isLate } from '@/lib/attendance-utils';
 import { validateGeolocation } from '@/lib/geo-utils';
+import { emitSocketEvent } from '@/lib/socket-server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -121,6 +122,15 @@ export async function POST(request: NextRequest) {
           },
           include: { student: { include: { class: true } } },
         });
+
+    emitSocketEvent('attendance:checkin', {
+      action: 'checkin',
+      student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, level: student.class.level },
+      attendance,
+      status,
+      isLate: late && !latePermission,
+      hasPermission: !!latePermission,
+    });
 
     return NextResponse.json({
       message: 'Check-in berhasil',

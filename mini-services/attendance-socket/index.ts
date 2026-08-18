@@ -58,6 +58,22 @@ io.on('connection', (socket) => {
     console.log('New good deed:', data.student?.name);
   });
 
+  // Broadcast by the Next server after /api/setup wipes and re-seeds the DB,
+  // so every open dashboard refetches immediately instead of showing stale
+  // data. Dashboards subscribe via useApiFetch (always listens for this).
+  socket.on('data:reset', (data) => {
+    io.emit('data:reset', data);
+    console.log('Data reset event:', data?.message || 'database reseeded');
+  });
+
+  // Broadcast by the Next server's subscription-alert checker (instrumentation.ts):
+  // schools expiring within 30 days or locked. The app shell turns it into a
+  // toast for the Super Admin / affected school admins.
+  socket.on('subscription:alert', (data) => {
+    io.emit('subscription:alert', data);
+    console.log('Subscription alert event:', data?.expiring?.length, 'expiring,', data?.locked?.length, 'locked');
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });

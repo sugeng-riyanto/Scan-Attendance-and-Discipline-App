@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { emitSocketEvent } from '@/lib/socket-server';
+import { decideScanAction } from '@/lib/scan-gating';
 
 // Euclidean distance between two 128-dim vectors
 function euclideanDistance(a: number[], b: number[]): number {
@@ -125,49 +127,129 @@ export async function POST(request: NextRequest) {
     const cutoffConfig = await db.schoolConfig.findUnique({ where: { key: 'checkin_cutoff_hour' } });
     const cutoffHour = cutoffConfig ? parseInt(cutoffConfig.value) : 7; // Default 07:00
 
+    // Active scan session shift gating: PAGI only allows check-in, SORE only
+    // allows check-out. No active session (or no shift set) = no gating.
+    const activeScanSession = await db.scanSession.findFirst({ where: { isActive: true } });
+    const sessionShift = activeScanSession?.shift || null;
+
+    // Decide the action with the pure gating rules (unit-tested in
+    // src/lib/scan-gating.test.ts) so the route stays a thin executor.
+    const minHoursConfig = await db.schoolConfig.findUnique({ where: { key: 'min_checkout_hours' } });
+    const minCheckoutHours = minHoursConfig ? parseFloat(minHoursConfig.value) : 4;
+
+    const decision = decideScanAction({
+      hasExistingAttendance: !!existingAttendance,
+      hasCheckOutTime: !!existingAttendance?.checkOutTime,
+      hasCheckInTime: !!existingAttendance?.checkInTime,
+      checkInTime: existingAttendance?.checkInTime ?? null,
+      sessionShift,
+      now,
+      minCheckoutHours,
+    });
+
     let result;
-    if (existingAttendance) {
-      // Check-out
-      if (existingAttendance.checkOutTime) {
+    if (decision.kind === 'already_done') {
+      result = {
+        found: true,
+        student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, photoUrl: student.photoBase64 || student.photoUrl },
+        alreadyDone: true,
+        message: `${student.name} sudah melakukan check-in dan check-out hari ini.`,
+        attendance: {
+          checkInTime: existingAttendance?.checkInTime ?? null,
+          checkOutTime: existingAttendance?.checkOutTime ?? null,
+          status: existingAttendance?.status ?? null,
+        },
+      };
+    } else if (decision.kind === 'refused') {
+      const base = {
+        found: true,
+        refused: true,
+        student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, photoUrl: student.photoBase64 || student.photoUrl },
+      };
+      if (decision.reason === 'pagi_checkout') {
+        // PAGI sessions are for check-in only — refuse the check-out.
         result = {
-          found: true,
-          student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, photoUrl: student.photoBase64 || student.photoUrl },
-          alreadyDone: true,
-          message: `${student.name} sudah melakukan check-in dan check-out hari ini.`,
+          ...base,
+          message: `${student.name} sudah check-in. Sesi PAGI hanya untuk check-in — check-out dilakukan pada sesi SORE.`,
           attendance: {
-            checkInTime: existingAttendance.checkInTime,
-            checkOutTime: existingAttendance.checkOutTime,
-            status: existingAttendance.status,
+            checkInTime: existingAttendance?.checkInTime ?? null,
+            checkOutTime: existingAttendance?.checkOutTime ?? null,
+            status: existingAttendance?.status ?? null,
+          },
+        };
+      } else if (decision.reason === 'min_checkout_hours') {
+        const checkInTimeStr = existingAttendance?.checkInTime
+          ? existingAttendance.checkInTime.toLocaleTimeString('id-ID', {
+              timeZone: timezone,
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : '—';
+        const hoursStr = Number.isInteger(minCheckoutHours) ? String(minCheckoutHours) : minCheckoutHours.toFixed(1);
+        result = {
+          ...base,
+          message: `${student.name} baru check-in pukul ${checkInTimeStr} WIB. Check-out diperbolehkan setelah minimal ${hoursStr} jam sejak check-in.`,
+          attendance: {
+            checkInTime: existingAttendance?.checkInTime ?? null,
+            checkOutTime: existingAttendance?.checkOutTime ?? null,
+            status: existingAttendance?.status ?? null,
+          },
+        };
+      } else if (decision.reason === 'no_checkin') {
+        // The student has a placeholder record (IZIN/ALPHA/SAKIT) but never
+        // checked in — refuse the check-out instead of stamping a check-out
+        // time on an absent row.
+        const status = existingAttendance?.status ? ` (status: ${existingAttendance.status})` : '';
+        result = {
+          ...base,
+          message: `${student.name} belum tercatat check-in hari ini${status}. Check-out tidak dapat dilakukan karena belum ada check-in.`,
+          attendance: {
+            checkInTime: existingAttendance?.checkInTime ?? null,
+            checkOutTime: existingAttendance?.checkOutTime ?? null,
+            status: existingAttendance?.status ?? null,
           },
         };
       } else {
-        // Do check-out
-        const checkoutMethod = method || 'QR';
-        const updated = await db.attendance.update({
-          where: { id: existingAttendance.id },
-          data: {
-            checkOutTime: now,
-            checkOutMethod: checkoutMethod,
-            checkOutLat: latitude || null,
-            checkOutLng: longitude || null,
-            checkOutAccuracy: accuracy || null,
-            geoVerified,
-            verifiedByFace: method === 'FACE' || false,
-          },
-        });
-
+        // SORE sessions are for check-out only — refuse the check-in.
         result = {
-          found: true,
-          student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, photoUrl: student.photoBase64 || student.photoUrl },
-          action: 'checkout',
-          message: `Check-out berhasil: ${student.name}`,
-          attendance: {
-            checkInTime: updated.checkInTime,
-            checkOutTime: updated.checkOutTime,
-            status: updated.status,
-          },
+          ...base,
+          message: `${student.name} belum check-in hari ini. Sesi SORE hanya untuk check-out — check-in dilakukan pada sesi PAGI.`,
         };
       }
+    } else if (decision.kind === 'checkout') {
+      // Do check-out
+      const checkoutMethod = method || 'QR';
+      const updated = await db.attendance.update({
+        where: { id: existingAttendance!.id },
+        data: {
+          checkOutTime: now,
+          checkOutMethod: checkoutMethod,
+          checkOutLat: latitude || null,
+          checkOutLng: longitude || null,
+          checkOutAccuracy: accuracy || null,
+          geoVerified,
+          verifiedByFace: method === 'FACE' || false,
+        },
+      });
+
+      emitSocketEvent('attendance:checkout', {
+        action: 'checkout',
+        student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name },
+        attendance: updated,
+        isEarlyDeparture: false,
+      });
+
+      result = {
+        found: true,
+        student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, photoUrl: student.photoBase64 || student.photoUrl },
+        action: 'checkout',
+        message: `Check-out berhasil: ${student.name}`,
+        attendance: {
+          checkInTime: updated.checkInTime,
+          checkOutTime: updated.checkOutTime,
+          status: updated.status,
+        },
+      };
     } else {
       // Check-in
       const checkInMethod = method || 'QR';
@@ -202,6 +284,14 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      emitSocketEvent('attendance:checkin', {
+        action: 'checkin',
+        student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name },
+        attendance,
+        status,
+        isLate,
+      });
+
       // Update student violation points if late
       if (isLate) {
         const lateCategory = await db.violationCategory.findFirst({ where: { code: 'TRLM' } });
@@ -223,6 +313,12 @@ export async function POST(request: NextRequest) {
             await db.student.update({
               where: { id: student.id },
               data: { totalViolationPoints: { increment: lateCategory.defaultPoints } },
+            });
+            emitSocketEvent('violation:new', {
+              student: { id: student.id, name: student.name, className: student.class.name },
+              points: lateCategory.defaultPoints,
+              description: `Terlambat masuk sekolah - check in ${now.toLocaleTimeString('id-ID', { timeZone: timezone })}`,
+              date: today,
             });
           } catch (violationErr) {
             console.error('Failed to create late violation:', violationErr);

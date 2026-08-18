@@ -4,8 +4,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import Webcam from 'react-webcam'
 import { toast } from 'sonner'
+import { Toaster as SonnerToaster } from '@/components/ui/sonner'
+import { ShiftGateBadge } from '@/components/shared/shift-gate-badge'
+import { ThemeToggle } from '@/components/theme-toggle'
 import {
-  ScanLine, Camera, UserCheck, AlertCircle, CheckCircle, Clock, MapPin,
+  ScanLine, Camera, UserCheck, AlertCircle, CheckCircle, AlertTriangle, Clock, MapPin,
   Volume2, RefreshCw, GraduationCap, Eye, X, Wifi, WifiOff,
   Power, PowerOff, ToggleLeft, ToggleRight, Monitor, Zap, Maximize2, Minimize2, Home
 } from 'lucide-react'
@@ -57,6 +60,9 @@ interface ScanResult {
   message: string;
   welcomeMessage?: string;
   alreadyDone?: boolean;
+  // True when the scan was deliberately refused by the server (shift gate or
+  // minimum-checkout-hours guard) — show it as a warning, not a success.
+  refused?: boolean;
   canCheckIn?: boolean;
   attendance?: {
     checkInTime?: string;
@@ -94,10 +100,29 @@ interface DetectedFace {
   descriptor: Float32Array;
 }
 
+// Auto-detect throttling: don't re-fire a scan for the same face within this
+// window, so a student lingering in front of the camera doesn't hammer the
+// server every 300ms (and accidentally flip a fresh check-in to check-out).
+const SCAN_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+// Max Euclidean distance between two 128-dim descriptors to consider them the
+// same face. Real captures of one person are well below this; different
+// students are far above it.
+const SAME_FACE_DISTANCE = 0.45;
+
+function descriptorsSimilar(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false
+  let sum = 0
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i]
+    sum += d * d
+  }
+  return Math.sqrt(sum) < SAME_FACE_DISTANCE
+}
+
 function useSchoolConfig() {
   const [config, setConfig] = useState({
-    school_name: 'SMP-SMA Nusantara',
-    school_address: 'Jl. Pendidikan No. 1, Indonesia',
+    school_name: 'Attendance Application',
+    school_address: 'Jl. Pala Raya No. 51, Pamulang, Tangerang Selatan, Banten',
     school_logo: '',
     theme_color: '#10b981',
     timezone: 'Asia/Jakarta',
@@ -197,7 +222,20 @@ export default function PublicScanPage() {
   const config = useSchoolConfig()
   const geo = useGeolocation()
   const [mounted, setMounted] = useState(false)
-  const [scanMode, setScanMode] = useState<'qr' | 'face'>('qr')
+  // Start in the active session's default mode when a cached session exists
+  // (avoids a flash of the wrong scanner on load). fetchScanSession() below
+  // re-applies the server's defaultMode once fetched, overriding a stale cache.
+  const [scanMode, setScanMode] = useState<'qr' | 'face'>(() => {
+    if (typeof window === 'undefined') return 'qr'
+    try {
+      const cached = localStorage.getItem('scan_session_cache')
+      if (cached) {
+        const s = JSON.parse(cached)
+        if (s.active && s.defaultMode) return s.defaultMode === 'QR' ? 'qr' : 'face'
+      }
+    } catch (e) {}
+    return 'qr'
+  })
   const [processing, setProcessing] = useState(false)
   const [result, setResult] = useState<ScanResult | null>(null)
   const [manualNisn, setManualNisn] = useState('')
@@ -211,6 +249,10 @@ export default function PublicScanPage() {
   const [loginUsername, setLoginUsername] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
+  const [loginTermsAccepted, setLoginTermsAccepted] = useState(false)
+  // Set when the live server state shows a session already active in the
+  // OTHER shift — warn staff before letting them switch the gate mid-day.
+  const [shiftSwitch, setShiftSwitch] = useState<{ current: string; proposed: string } | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   const toggleFullscreen = () => {
@@ -234,6 +276,12 @@ export default function PublicScanPage() {
   const [autoDetect, setAutoDetect] = useState(false)
   const [faceBox, setFaceBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Last successfully auto-scanned face: used to suppress re-scans of the
+  // same person within the cooldown window.
+  const lastScanRef = useRef<{ studentId?: string; descriptor: Float32Array; at: number } | null>(null)
+  // True once staff confirmed a mid-day gate switch; the login flow then ends
+  // the other shift's session before activating the new one.
+  const pendingSwitchRef = useRef(false)
 
   // Fix hydration: only render time after mount
   useEffect(() => {
@@ -265,7 +313,6 @@ export default function PublicScanPage() {
   useEffect(() => {
     if (scanMode !== 'face' || !modelsLoaded || processing || !webcamRef.current) return
     let active = true
-    let lastDescriptor: Float32Array | null = null
 
     const detectLoop = async () => {
       if (!active || !webcamRef.current) return
@@ -306,16 +353,21 @@ export default function PublicScanPage() {
             h: detection.detection.box.height * scaleY,
           })
 
-          // Auto-detect mode: automatically verify face
-          if (autoDetect && !processing && lastDescriptor !== detection.descriptor) {
-            lastDescriptor = detection.descriptor
-            handleFaceDescriptorVerify(Array.from(detection.descriptor) as number[])
+          // Auto-detect mode: verify the face unless it's the same person
+          // re-scanned within the cooldown window (lingering-face
+          // suppression). Compare descriptors by value, not by reference.
+          if (autoDetect && !processing) {
+            const last = lastScanRef.current
+            const sameFace = last ? descriptorsSimilar(detection.descriptor, last.descriptor) : false
+            const withinCooldown = last ? Date.now() - last.at < SCAN_COOLDOWN_MS : false
+            if (!sameFace || !withinCooldown) {
+              handleFaceDescriptorVerify(Array.from(detection.descriptor) as number[])
+            }
           }
         } else {
           setFaceDetected(false)
           setDetectedFaceData(null)
           setFaceBox(null)
-          lastDescriptor = null
         }
       } catch (e) {
         // Ignore detection errors in loop
@@ -403,6 +455,14 @@ export default function PublicScanPage() {
     if (data.welcomeMessage) {
       setShowWelcome(true)
       speakWelcome(data.welcomeMessage)
+      setTimeout(() => setShowWelcome(false), 8000)
+    } else if (data.refused) {
+      // Gate / min-hours refusal: the server sent a message with no action.
+      // Surface it in the big welcome card (so staff on a kiosk can't miss
+      // WHY the scan was rejected) plus a toast.
+      setShowWelcome(true)
+      speakWelcome(data.message || 'Scan ditolak')
+      toast.warning(data.message || 'Scan ditolak')
       setTimeout(() => setShowWelcome(false), 8000)
     }
   }, [speakWelcome])
@@ -534,6 +594,15 @@ export default function PublicScanPage() {
           }
           processResult(data)
           if (data.action) toast.success(data.message)
+          // Remember this face so the auto-detect loop suppresses re-scans of
+          // the same student for SCAN_COOLDOWN_MS.
+          if (data.found && data.student?.id) {
+            lastScanRef.current = {
+              studentId: data.student.id,
+              descriptor: new Float32Array(descriptor),
+              at: Date.now(),
+            }
+          }
         }
       } else {
         if (!manualNisn.trim()) {
@@ -592,6 +661,34 @@ export default function PublicScanPage() {
       toast.error('Tidak dapat mengubah status scan saat offline')
       return
     }
+    // When (re)activating, check the LIVE server state first: the kiosk's own
+    // state may be stale, and a session could already be active in the other
+    // shift. Switching the gate mid-day should be an explicit choice.
+    if (activate) {
+      try {
+        const fresh = await (await fetch('/api/scan-session')).json()
+        if (fresh.active) {
+          const proposedShift = new Date().getHours() < 12 ? 'PAGI' : 'SORE'
+          if (fresh.shift && fresh.shift !== proposedShift) {
+            setShiftSwitch({ current: fresh.shift, proposed: proposedShift })
+            return
+          }
+          toast.info(fresh.shift ? `Scanner sudah aktif (${fresh.shift})` : 'Scanner sudah aktif')
+          fetchScanSession()
+          return
+        }
+      } catch (e) {
+        // If the freshness check fails, fall through to the normal flow.
+      }
+    }
+    setShowLoginDialog(true)
+  }
+
+  // Staff confirmed switching the gate from one shift to the other: remember
+  // it, then proceed to the login flow.
+  const confirmShiftSwitch = () => {
+    pendingSwitchRef.current = true
+    setShiftSwitch(null)
     setShowLoginDialog(true)
   }
 
@@ -600,12 +697,16 @@ export default function PublicScanPage() {
       toast.error('Masukkan username dan password')
       return
     }
+    if (!loginTermsAccepted) {
+      toast.error('Anda harus menyetujui Syarat dan Ketentuan terlebih dahulu')
+      return
+    }
     setLoginLoading(true)
     try {
       const authRes = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+        body: JSON.stringify({ username: loginUsername, password: loginPassword, acceptedTerms: true }),
       })
       const authData = await authRes.json()
       if (!authRes.ok) {
@@ -622,6 +723,22 @@ export default function PublicScanPage() {
       localStorage.setItem('currentUserId', authData.user.id)
 
       const action = scanSession?.active ? 'deactivate' : 'activate'
+
+      // A confirmed mid-day switch: end the other shift's session first, since
+      // the API rejects activating while any session is still active.
+      if (action === 'activate' && pendingSwitchRef.current) {
+        pendingSwitchRef.current = false
+        try {
+          await fetch('/api/scan-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'deactivate', userId: authData.user.id }),
+          })
+        } catch (e) {
+          // The old session may have already ended elsewhere — ignore.
+        }
+      }
+
       const sessionRes = await fetch('/api/scan-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -650,6 +767,11 @@ export default function PublicScanPage() {
     }
   }
 
+  // The scan mode the active session defaults to (QR unless the session says FACE)
+  const sessionDefaultMode: 'qr' | 'face' = scanSession?.active
+    ? (scanSession.defaultMode === 'FACE' ? 'face' : 'qr')
+    : 'qr'
+
   const timeStr = mounted && currentTime ? currentTime.toLocaleTimeString('id-ID', {
     timeZone: config.timezone,
     hour: '2-digit',
@@ -666,9 +788,13 @@ export default function PublicScanPage() {
   }) : ''
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
+      {/* This page renders outside the dashboard shell, so the sonner Toaster
+          (which the shell normally mounts) must be mounted here or every
+          toast.* call is a silent no-op. */}
+      <SonnerToaster />
       {/* Header */}
-      <div className="bg-white shadow-sm border-b" style={{ borderTop: `4px solid ${config.theme_color}` }}>
+      <div className="bg-white shadow-sm border-b dark:bg-gray-900 dark:border-gray-800" style={{ borderTop: `4px solid ${config.theme_color}` }}>
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {config.school_logo ? (
@@ -684,7 +810,8 @@ export default function PublicScanPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={toggleFullscreen} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500" title={isFullscreen ? 'Keluar layar penuh' : 'Layar penuh'}>
+            <ThemeToggle />
+            <button onClick={toggleFullscreen} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 dark:hover:bg-gray-800 dark:text-gray-400" title={isFullscreen ? 'Keluar layar penuh' : 'Layar penuh'}>
               {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </button>
             <div className={`flex items-center gap-1 text-xs ${isOnline ? 'text-green-600' : 'text-orange-500'}`}>
@@ -701,7 +828,9 @@ export default function PublicScanPage() {
       {/* Scan Session Status Bar */}
       <div className="max-w-lg mx-auto px-4 mt-2">
         <div className={`flex items-center justify-between p-2 rounded-lg text-xs ${
-          scanSession?.active ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+          scanSession?.active
+            ? 'bg-green-50 border border-green-200 dark:bg-green-950/40 dark:border-green-900'
+            : 'bg-red-50 border border-red-200 dark:bg-red-950/40 dark:border-red-900'
         }`}>
           <div className="flex items-center gap-2">
             <div className={`h-2 w-2 rounded-full ${scanSession?.active ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
@@ -712,7 +841,7 @@ export default function PublicScanPage() {
               <span className="text-gray-500">oleh {scanSession.activatedBy}</span>
             )}
             {scanSession?.active && scanSession.shift && (
-              <Badge shift={scanSession.shift} />
+              <ShiftGateBadge shift={scanSession.shift} />
             )}
           </div>
           <button
@@ -769,6 +898,48 @@ export default function PublicScanPage() {
         </div>
       )}
 
+      {/* Shift-switch warning: a session is already active in the other shift */}
+      {shiftSwitch && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-800">Ganti Gate Scanner?</h3>
+              <button onClick={() => setShiftSwitch(null)}><X className="h-5 w-5 text-gray-400" /></button>
+            </div>
+            <div className="space-y-3 mb-4">
+              <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500">Sedang aktif</span>
+                <ShiftGateBadge shift={shiftSwitch.current} />
+              </div>
+              <div className="flex items-center justify-between bg-amber-50 rounded-lg p-3 border border-amber-200">
+                <span className="text-xs text-amber-700">Akan diaktifkan</span>
+                <ShiftGateBadge shift={shiftSwitch.proposed} />
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Sesi {shiftSwitch.current} masih aktif. Mengaktifkan sesi {shiftSwitch.proposed} akan mematikan gate
+              {shiftSwitch.current === 'PAGI' ? ' check-in' : ' check-out'} dan memindahkannya ke
+              {shiftSwitch.proposed === 'PAGI' ? ' check-in' : ' check-out'} — pastikan ini memang yang Anda inginkan.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShiftSwitch(null)}
+                className="flex-1 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmShiftSwitch}
+                className="flex-1 py-2 text-white rounded-lg text-sm font-medium"
+                style={{ backgroundColor: config.theme_color }}
+              >
+                Ya, Ganti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Login Dialog for Toggle */}
       {showLoginDialog && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -799,6 +970,21 @@ export default function PublicScanPage() {
                 className="w-full px-3 py-2 border rounded-lg text-sm"
                 onKeyDown={e => e.key === 'Enter' && handleLoginAndToggle()}
               />
+              <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={loginTermsAccepted}
+                  onChange={e => setLoginTermsAccepted(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span className="leading-relaxed">
+                  Saya menyetujui{' '}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-2" style={{ color: config.theme_color }}>
+                    Syarat dan Ketentuan Penggunaan
+                  </a>{' '}
+                  sebelum login.
+                </span>
+              </label>
               <button
                 onClick={handleLoginAndToggle}
                 disabled={loginLoading}
@@ -812,25 +998,35 @@ export default function PublicScanPage() {
         </div>
       )}
 
-      {/* Welcome Card */}
+      {/* Welcome Card — also used for refusals so staff see WHY a scan was
+          rejected in the same big, can't-miss presentation as a check-in */}
       {showWelcome && result?.student && (
         <div className="max-w-lg mx-auto px-4 mt-4">
-          <div className="rounded-xl p-6 text-center shadow-lg animate-in fade-in slide-in-from-bottom-4" style={{ backgroundColor: result.isLate ? '#fef3c7' : '#ecfdf5', border: `2px solid ${result.isLate ? '#f59e0b' : '#10b981'}` }}>
-            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full" style={{ backgroundColor: result.isLate ? '#fbbf24' : '#34d399' }}>
-              {result.isLate ? <AlertCircle className="h-8 w-8 text-white" /> : <CheckCircle className="h-8 w-8 text-white" />}
+          <div className="rounded-xl p-6 text-center shadow-lg animate-in fade-in slide-in-from-bottom-4" style={{
+            backgroundColor: result.refused ? '#fffbeb' : result.isLate ? '#fef3c7' : '#ecfdf5',
+            border: `2px solid ${result.refused ? '#f59e0b' : result.isLate ? '#f59e0b' : '#10b981'}`,
+          }}>
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full" style={{ backgroundColor: result.refused ? '#f59e0b' : result.isLate ? '#fbbf24' : '#34d399' }}>
+              {result.refused ? <AlertTriangle className="h-8 w-8 text-white" /> : result.isLate ? <AlertCircle className="h-8 w-8 text-white" /> : <CheckCircle className="h-8 w-8 text-white" />}
             </div>
-            <h3 className="text-xl font-bold mb-1" style={{ color: result.isLate ? '#92400e' : '#065f46' }}>
-              {result.action === 'checkin' ? (result.isLate ? 'Terlambat' : 'Selamat Datang!') : 'Selamat Pulang!'}
+            <h3 className="text-xl font-bold mb-1" style={{ color: result.refused ? '#92400e' : result.isLate ? '#92400e' : '#065f46' }}>
+              {result.refused ? 'Scan Ditolak' : result.action === 'checkin' ? (result.isLate ? 'Terlambat' : 'Selamat Datang!') : 'Selamat Pulang!'}
             </h3>
             <p className="text-lg font-semibold">{result.student.name}</p>
             <p className="text-sm text-gray-600">{result.student.nisn} • {result.student.className}</p>
-            {result.confidence && (
-              <p className="text-xs text-gray-500 mt-1">Akurasi wajah: {(parseFloat(result.confidence) * 100).toFixed(1)}%</p>
-            )}
-            {result.welcomeMessage && (
-              <p className="mt-3 text-sm italic" style={{ color: result.isLate ? '#92400e' : '#065f46' }}>
-                &ldquo;{result.welcomeMessage}&rdquo;
-              </p>
+            {result.refused ? (
+              <p className="mt-3 text-sm font-medium" style={{ color: '#92400e' }}>{result.message}</p>
+            ) : (
+              <>
+                {result.confidence && (
+                  <p className="text-xs text-gray-500 mt-1">Akurasi wajah: {(parseFloat(result.confidence) * 100).toFixed(1)}%</p>
+                )}
+                {result.welcomeMessage && (
+                  <p className="mt-3 text-sm italic" style={{ color: result.isLate ? '#92400e' : '#065f46' }}>
+                    &ldquo;{result.welcomeMessage}&rdquo;
+                  </p>
+                )}
+              </>
             )}
             <div className="mt-3 flex items-center justify-center gap-1 text-xs text-gray-500">
               <Volume2 className="h-3 w-3" /> Pesan suara aktif
@@ -843,11 +1039,13 @@ export default function PublicScanPage() {
       {result && !showWelcome && (
         <div className="max-w-lg mx-auto px-4 mt-4">
           <div className="rounded-xl p-4 shadow border" style={{
-            backgroundColor: result.found ? (result.alreadyDone ? '#eff6ff' : '#ecfdf5') : '#fef2f2',
-            borderColor: result.found ? (result.alreadyDone ? '#93c5fd' : '#6ee7b7') : '#fca5a5'
+            backgroundColor: result.refused ? '#fffbeb' : result.found ? (result.alreadyDone ? '#eff6ff' : '#ecfdf5') : '#fef2f2',
+            borderColor: result.refused ? '#fcd34d' : result.found ? (result.alreadyDone ? '#93c5fd' : '#6ee7b7') : '#fca5a5'
           }}>
             <div className="flex items-start gap-3">
-              {result.found ? (
+              {result.refused ? (
+                <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+              ) : result.found ? (
                 <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
               ) : (
                 <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
@@ -899,7 +1097,7 @@ export default function PublicScanPage() {
       {/* Scanner Inactive Message */}
       {!scanSession?.active && mounted && (
         <div className="max-w-lg mx-auto px-4 mt-8 text-center">
-          <div className="bg-white rounded-xl p-8 shadow border">
+          <div className="bg-white rounded-xl p-8 shadow border dark:bg-gray-900 dark:border-gray-800">
             <Monitor className="h-16 w-16 mx-auto text-gray-300 mb-4" />
             <h3 className="text-lg font-semibold text-gray-600 mb-2">Scanner Presensi Nonaktif</h3>
             <p className="text-sm text-gray-500 mb-4">
@@ -915,34 +1113,56 @@ export default function PublicScanPage() {
       {/* Scan Section - Only shown when session is active */}
       {scanSession?.active && mounted && (
         <div className="max-w-lg mx-auto px-4 mt-6 pb-8">
-          {/* Mode Toggle — QR is default, Face is optional */}
+          {/* Shift gate banner — tells staff whether this session is a check-in
+              or check-out gate before they scan */}
+          {scanSession.shift && (
+            <div className={`mb-4 rounded-xl p-3 flex items-start gap-2 text-sm ${
+              scanSession.shift === 'PAGI'
+                ? 'bg-yellow-50 border border-yellow-300 text-yellow-800 dark:bg-yellow-950/40 dark:border-yellow-800 dark:text-yellow-200'
+                : 'bg-orange-50 border border-orange-300 text-orange-800 dark:bg-orange-950/40 dark:border-orange-800 dark:text-orange-200'
+            }`}>
+              <Clock className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  Sesi {scanSession.shift} — {scanSession.shift === 'PAGI' ? 'Check-in' : 'Check-out'}
+                </p>
+                <p className="text-xs mt-0.5">
+                  {scanSession.shift === 'PAGI'
+                    ? 'Scanner hanya menerima CHECK-IN pagi ini. Check-out dilakukan pada sesi SORE.'
+                    : 'Scanner hanya menerima CHECK-OUT (pulang sekolah). Check-in dilakukan pada sesi PAGI.'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Mode Toggle — the session's defaultMode is marked as default */}
           <div className="flex items-center justify-center gap-3 mb-4">
             <button
               onClick={() => setScanMode('qr')}
               className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all ${
                 scanMode === 'qr'
                   ? 'text-white shadow-md'
-                  : 'bg-white border text-gray-600 hover:bg-gray-50'
+                  : 'bg-white border text-gray-600 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
               }`}
               style={scanMode === 'qr' ? { backgroundColor: config.theme_color } : {}}
             >
-              <ScanLine className="h-5 w-5" /> Scan QR <span className="text-[10px] opacity-80 ml-1">(default)</span>
+              <ScanLine className="h-5 w-5" /> Scan QR {sessionDefaultMode === 'qr' && <span className="text-[10px] opacity-80 ml-1">(default)</span>}
             </button>
             <button
               onClick={() => setScanMode('face')}
               className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all ${
                 scanMode === 'face'
                   ? 'text-white shadow-md'
-                  : 'bg-white border text-gray-600 hover:bg-gray-50'
+                  : 'bg-white border text-gray-600 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
               }`}
               style={scanMode === 'face' ? { backgroundColor: config.theme_color } : {}}
             >
-              <Camera className="h-5 w-5" /> Scan Wajah <span className="text-[10px] opacity-80 ml-1">(uji coba)</span>
+              <Camera className="h-5 w-5" /> Scan Wajah {sessionDefaultMode === 'face' && <span className="text-[10px] opacity-80 ml-1">(default)</span>}
             </button>
           </div>
 
           {/* Manual NISN Input - Always visible */}
-          <div className="bg-white rounded-xl p-4 shadow border mb-4">
+          <div className="bg-white rounded-xl p-4 shadow border mb-4 dark:bg-gray-900 dark:border-gray-800">
             <p className="text-sm font-medium text-gray-700 mb-2">Input Manual NISN</p>
             <div className="flex gap-2">
               <input
@@ -986,8 +1206,8 @@ export default function PublicScanPage() {
           {/* Face Scanner Mode */}
           {scanMode === 'face' && (
             <div className="space-y-4">
-              <div className="bg-white rounded-xl p-4 shadow border">
-                <p className="text-sm font-medium text-gray-700 mb-1">NISN (Opsional - kosongkan untuk auto-detect)</p>
+              <div className="bg-white rounded-xl p-4 shadow border dark:bg-gray-900 dark:border-gray-800">
+                <p className="text-sm font-medium text-gray-700 mb-1 dark:text-gray-200">NISN (Opsional - kosongkan untuk auto-detect)</p>
                 <p className="text-xs text-gray-500 mb-2">Jika NISN diisi, verifikasi lebih akurat. Jika dikosongkan, sistem akan mengenali wajah secara otomatis.</p>
                 <input
                   type="text"
@@ -1047,7 +1267,7 @@ export default function PublicScanPage() {
               </div>
 
               {/* Auto-detect toggle */}
-              <div className="flex items-center justify-between bg-white rounded-xl p-3 shadow border">
+              <div className="flex items-center justify-between bg-white rounded-xl p-3 shadow border dark:bg-gray-900 dark:border-gray-800">
                 <div className="flex items-center gap-2">
                   <Zap className={`h-4 w-4 ${autoDetect ? 'text-amber-500' : 'text-gray-400'}`} />
                   <div>
@@ -1083,7 +1303,7 @@ export default function PublicScanPage() {
               )}
 
               {autoDetect && (
-                <div className="text-center py-2 px-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+                <div className="text-center py-2 px-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300">
                   <Zap className="h-4 w-4 inline mr-1" />
                   Auto-detect aktif. Wajah akan diverifikasi secara otomatis saat terdeteksi.
                   {processing && <span className="ml-2 font-medium">Sedang memverifikasi...</span>}
@@ -1097,14 +1317,4 @@ export default function PublicScanPage() {
   )
 }
 
-function Badge({ shift }: { shift: string }) {
-  const colors: Record<string, string> = {
-    PAGI: 'bg-yellow-100 text-yellow-700',
-    SORE: 'bg-orange-100 text-orange-700',
-  }
-  return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${colors[shift] || 'bg-gray-100 text-gray-600'}`}>
-      {shift}
-    </span>
-  )
-}
+

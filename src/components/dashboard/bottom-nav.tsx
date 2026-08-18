@@ -9,10 +9,10 @@ export function BottomNav({ themeColor }: { themeColor: string }) {
   const { activePage, setActivePage } = useAppStore()
   if (!user) return null
 
-  const items = NAV_ITEMS.filter(n => n.roles.includes(user.role) && MOBILE_NAV_IDS.includes(n.id))
+  const items = NAV_ITEMS.filter(n => (user.role === 'SUPER_ADMIN' || n.roles.includes(user.role)) && MOBILE_NAV_IDS.includes(n.id))
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t lg:hidden safe-area-bottom">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t lg:hidden safe-area-bottom dark:bg-gray-900 dark:border-gray-800">
       <div className="flex items-center justify-around h-16">
         {items.map(item => (
           <button key={item.id}

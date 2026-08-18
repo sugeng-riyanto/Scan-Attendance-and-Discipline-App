@@ -14,10 +14,10 @@ import { DisciplinePatternChart } from './discipline-pattern-chart'
 import { StatisticsData, BehaviorAlert, ViolationRecord, GoodDeedRecord } from './types'
 
 export function KepsekDashboard() {
-  const { data: stats, loading } = useApiFetch<StatisticsData>('/api/statistics?period=monthly')
-  const { data: alertData } = useApiFetch<{ alerts: BehaviorAlert[] }>('/api/alerts?targetRole=KEPALA_SEKOLAH')
-  const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>('/api/violations')
-  const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>('/api/good-deeds')
+  const { data: stats, loading } = useApiFetch<StatisticsData>('/api/statistics?period=monthly', [], ['attendance:update', 'violation:update', 'good-deed:update'])
+  const { data: alertData } = useApiFetch<{ alerts: BehaviorAlert[] }>('/api/alerts?targetRole=KEPALA_SEKOLAH', [], ['alert:new'])
+  const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>('/api/violations', [], ['violation:update'])
+  const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>('/api/good-deeds', [], ['good-deed:update'])
   const alerts = alertData?.alerts || []
 
   if (loading) return <PageSkeleton />
@@ -29,7 +29,7 @@ export function KepsekDashboard() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Dashboard Kepala Sekolah</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Kepala Sekolah</h2>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <Card><CardContent className="p-4">
           <div className="flex items-center gap-3">

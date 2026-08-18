@@ -21,10 +21,10 @@ import { apiFetch } from '@/lib/api-fetch'
 import { getBehaviorLevel } from '@/lib/attendance-utils'
 
 export function VPKesDashboard() {
-  const { data: stats, loading } = useApiFetch<StatisticsData>('/api/statistics?period=monthly')
-  const { data: alertData } = useApiFetch<{ alerts: BehaviorAlert[] }>('/api/alerts?targetRole=VP_KESISWAAN')
-  const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>('/api/violations')
-  const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>('/api/good-deeds')
+  const { data: stats, loading } = useApiFetch<StatisticsData>('/api/statistics?period=monthly', [], ['attendance:update', 'violation:update', 'good-deed:update'])
+  const { data: alertData } = useApiFetch<{ alerts: BehaviorAlert[] }>('/api/alerts?targetRole=VP_KESISWAAN', [], ['alert:new'])
+  const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>('/api/violations', [], ['violation:update'])
+  const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>('/api/good-deeds', [], ['good-deed:update'])
   const { data: catData, refetch: catRefetch } = useApiFetch<CategoriesResponse>('/api/categories')
   const alerts = alertData?.alerts || []
 
@@ -67,7 +67,7 @@ export function VPKesDashboard() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Dashboard Wakasek Kesiswaan</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Wakasek Kesiswaan</h2>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <Card className="overflow-hidden"><CardContent className="p-4">
           <div className="flex items-center gap-3">
@@ -151,7 +151,7 @@ export function VPKesDashboard() {
         </CardHeader>
         <CardContent>
           {showCatForm && (
-            <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+            <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div><Label className="text-xs">Jenis</Label>
                   <Select value={catForm.type} onValueChange={v => setCatForm(p => ({ ...p, type: v as 'violation' | 'good-deed' }))}>

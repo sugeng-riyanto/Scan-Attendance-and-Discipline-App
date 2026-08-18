@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { isEarlyDeparture } from '@/lib/attendance-utils';
 import { validateGeolocation } from '@/lib/geo-utils';
+import { emitSocketEvent } from '@/lib/socket-server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -92,6 +93,14 @@ export async function POST(request: NextRequest) {
         deviceInfo: deviceInfo ? `${existing.deviceInfo || ''}; checkout: ${deviceInfo}` : existing.deviceInfo,
       },
       include: { student: { include: { class: true } } },
+    });
+
+    emitSocketEvent('attendance:checkout', {
+      action: 'checkout',
+      student: { id: student.id, name: student.name, nisn: student.nisn, className: student.class.name, level },
+      attendance,
+      isEarlyDeparture: early && !earlyPermission,
+      hasPermission: !!earlyPermission,
     });
 
     return NextResponse.json({

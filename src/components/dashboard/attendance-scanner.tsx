@@ -218,11 +218,11 @@ export function AttendanceScannerPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">Presensi</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Presensi</h2>
 
       {showWelcome && welcomeStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowWelcome(false)}>
-          <Card className="w-full max-w-md bg-white" onClick={e => e.stopPropagation()}>
+          <Card className="w-full max-w-md bg-white dark:bg-gray-900" onClick={e => e.stopPropagation()}>
             <CardContent className="p-6 text-center space-y-4">
               <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100">
                 {welcomeStatus === 'late' ?

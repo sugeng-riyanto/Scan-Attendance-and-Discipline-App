@@ -56,7 +56,7 @@ export function ExportPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">Export Data</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Export Data</h2>
 
       <Card>
         <CardContent className="p-6 space-y-4">

@@ -14,15 +14,15 @@ export function GuruDashboard() {
   const { user } = useAuthStore()
   const { setActivePage } = useAppStore()
   const today = new Date().toISOString().split('T')[0]
-  const { data: attData, loading } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?date=${today}`)
-  const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>('/api/violations')
-  const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>('/api/good-deeds')
+  const { data: attData, loading } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?date=${today}`, [], ['attendance:update'])
+  const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>('/api/violations', [], ['violation:update'])
+  const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>('/api/good-deeds', [], ['good-deed:update'])
 
   if (loading) return <PageSkeleton />
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Dashboard Guru</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Guru</h2>
       <div className="grid grid-cols-2 gap-4">
         <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActivePage('violations')}>
           <CardContent className="p-4 flex items-center gap-3">
@@ -48,7 +48,7 @@ export function GuruDashboard() {
               { label: 'Sakit', value: attData?.summary?.sakit || 0, color: 'text-purple-600' },
               { label: 'Alpha', value: attData?.summary?.alpha || 0, color: 'text-red-600' },
             ].map(s => (
-              <div key={s.label} className="p-2 bg-gray-50 rounded"><p className={`text-xl font-bold ${s.color}`}>{s.value}</p><p className="text-xs text-muted-foreground">{s.label}</p></div>
+              <div key={s.label} className="p-2 bg-gray-50 dark:bg-gray-800 rounded"><p className={`text-xl font-bold ${s.color}`}>{s.value}</p><p className="text-xs text-muted-foreground">{s.label}</p></div>
             ))}
           </div>
         </CardContent>

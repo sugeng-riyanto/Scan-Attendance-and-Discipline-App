@@ -36,7 +36,7 @@ export function ImportXlsxButton({ type, classId, academicYearId, onDone }: {
   return (
     <>
       <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} />
-      <a href={`/api/import-template?type=${type}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-2 py-1 text-xs border rounded-md hover:bg-gray-50">
+      <a href={`/api/import-template?type=${type}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-2 py-1 text-xs border rounded-md hover:bg-gray-50 dark:hover:bg-gray-800">
         <FileSpreadsheet className="h-3 w-3 mr-1" /> Template
       </a>
       <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={importing}>

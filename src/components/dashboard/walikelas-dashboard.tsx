@@ -60,7 +60,7 @@ function WaliKelasStudentView({ myClass }: { myClass: ClassInfo }) {
             {loading ? <Skeleton className="h-32 m-4" /> : (
               <div className="max-h-64 overflow-y-auto">
             {students.map(s => (
-              <div key={s.id} className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-gray-50 rounded px-1"
+              <div key={s.id} className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded px-1"
                 onClick={() => { setSelectedStudentId(s.id); setActivePage('student-profile') }}>
                 <div className="flex items-center gap-2">
                   <Avatar className="h-8 w-8">
@@ -93,15 +93,15 @@ export function WaliKelasDashboard() {
   const myClass = classesData?.classes?.find(c => c.homeroomTeacherId === user?.id)
 
   const { data: attData, loading: aLoad } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(
-    myClass ? `/api/attendance?date=${today}&classId=${myClass.id}` : null, [myClass?.id]
+    myClass ? `/api/attendance?date=${today}&classId=${myClass.id}` : null, [myClass?.id], ['attendance:update']
   )
   const { data: violData } = useApiFetch<{ violations: ViolationRecord[] }>(
-    myClass ? `/api/violations?classId=${myClass.id}` : null, [myClass?.id]
+    myClass ? `/api/violations?classId=${myClass.id}` : null, [myClass?.id], ['violation:update']
   )
   const { data: goodData } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>(
-    myClass ? `/api/good-deeds?classId=${myClass.id}` : null, [myClass?.id]
+    myClass ? `/api/good-deeds?classId=${myClass.id}` : null, [myClass?.id], ['good-deed:update']
   )
-  const { data: permData, refetch: permRefetch } = useApiFetch<{ permissions: PermissionRecord[] }>('/api/permissions')
+  const { data: permData, refetch: permRefetch } = useApiFetch<{ permissions: PermissionRecord[] }>('/api/permissions', [], ['permission:update'])
   const { data: studentsData } = useApiFetch<{ students: Student[] }>(
     myClass ? `/api/students?classId=${myClass.id}` : null, [myClass?.id]
   )
@@ -160,7 +160,7 @@ export function WaliKelasDashboard() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Dashboard Wali Kelas {myClass?.name || ''}</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Wali Kelas {myClass?.name || ''}</h2>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card><CardContent className="p-4">

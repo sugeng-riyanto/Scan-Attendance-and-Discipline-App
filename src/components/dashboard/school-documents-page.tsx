@@ -236,7 +236,7 @@ export function SchoolDocumentsPage() {
   if (!isAdminOrVpkes) {
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-gray-800">Dokumen Sekolah</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dokumen Sekolah</h2>
         {readerView}
       </div>
     )
@@ -245,7 +245,7 @@ export function SchoolDocumentsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">Dokumen Sekolah</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dokumen Sekolah</h2>
         <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={openCreate}>
           <Plus className="h-4 w-4 mr-1" /> Tambah
         </Button>

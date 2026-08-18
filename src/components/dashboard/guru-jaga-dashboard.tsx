@@ -20,12 +20,13 @@ import { ScanSessionToggle } from './scan-session-toggle'
 import { STATUS_COLORS } from './chart-constants'
 import { ClassInfo, Student, AttendanceRecord } from './types'
 import { formatTimeWIB } from '@/lib/attendance-utils'
+import { useSocketEvent } from '@/lib/socket-client'
 
 export function GuruJagaDashboard() {
   const schoolConfig = useSchoolConfig()
   const today = new Date().toISOString().split('T')[0]
   const { data: classesData } = useApiFetch<{ classes: ClassInfo[] }>('/api/classes')
-  const { data: attData, loading: attLoad, refetch: attRefetch } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?date=${today}`)
+  const { data: attData, loading: attLoad, refetch: attRefetch } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?date=${today}`, [], ['attendance:update'])
   const { data: dutyData } = useApiFetch<{ schedules: any[] }>('/api/duty-schedule')
   const { data: studentsData } = useApiFetch<{ students: Student[] }>('/api/students')
   const [shift, setShift] = useState<'PAGI' | 'SORE'>('PAGI')
@@ -36,6 +37,22 @@ export function GuruJagaDashboard() {
     const interval = setInterval(() => { attRefetch() }, 30000)
     return () => clearInterval(interval)
   }, [autoRefresh, attRefetch])
+
+  // Live updates from the attendance-socket mini-service: refresh instantly
+  // and surface a toast whenever a student checks in/out.
+  useSocketEvent('attendance:update', (data: any) => {
+    const name = data?.student?.name
+    const action = data?.action || (data?.attendance?.checkOutTime ? 'checkout' : 'checkin')
+    const status = data?.status || data?.attendance?.status
+    const toastId = `live-att-${name || 'unknown'}`
+    if (action === 'checkout') {
+      toast.info(`${name || 'Siswa'} melakukan check-out`, { id: toastId })
+    } else if (status === 'IZIN') {
+      toast.info(`${name || 'Siswa'} dicatat izin`, { id: toastId })
+    } else {
+      toast.success(`${name || 'Siswa'} melakukan check-in${data?.isLate ? ' (terlambat)' : ''}`, { id: toastId })
+    }
+  })
 
   const tz = schoolConfig.timezone || 'Asia/Jakarta'
   const formatTZ = (iso: string) => {
@@ -109,7 +126,7 @@ export function GuruJagaDashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">Monitor Presensi</h2>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Monitor Presensi</h2>
           <p className="text-sm text-muted-foreground">{dateStr} • {nowStr} ({tz})</p>
         </div>
         <div className="flex items-center gap-2">

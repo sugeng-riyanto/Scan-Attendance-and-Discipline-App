@@ -93,13 +93,13 @@ export function formatDateShort(date: Date | string): string {
  */
 export function getBehaviorLevel(points: number): { level: number; label: string; handler: string; color: string } {
   if (points <= 50) {
-    return { level: 1, label: 'Level 1', handler: 'Wali Kelas', color: 'text-green-600' };
+    return { level: 1, label: 'Level 1', handler: 'Homeroom Teacher', color: 'text-green-600' };
   } else if (points <= 100) {
-    return { level: 2, label: 'Level 2', handler: 'Wakasek Kesiswaan', color: 'text-yellow-600' };
+    return { level: 2, label: 'Level 2', handler: 'Vice Principal for Student Affairs', color: 'text-yellow-600' };
   } else if (points <= 150) {
-    return { level: 3, label: 'Level 3', handler: 'Kepala Sekolah', color: 'text-orange-600' };
+    return { level: 3, label: 'Level 3', handler: 'Principal', color: 'text-orange-600' };
   } else {
-    return { level: 4, label: 'Level 4', handler: 'Pemanggilan Ortu', color: 'text-red-600' };
+    return { level: 4, label: 'Level 4', handler: 'Parent Meeting', color: 'text-red-600' };
   }
 }
 
@@ -130,17 +130,18 @@ export function getViolationLevelColor(level: string): string {
 }
 
 /**
- * Role display names in Indonesian
+ * Role display names in English
  */
 export const roleLabels: Record<string, string> = {
-  ADMIN: 'Administrator',
-  KEPALA_SEKOLAH: 'Kepala Sekolah',
-  VP_KESISWAAN: 'Wakasek Kesiswaan',
-  WALI_KELAS: 'Wali Kelas',
-  GURU: 'Guru',
-  GURU_JAGA: 'Guru Jaga',
-  ORANG_TUA: 'Orang Tua',
-  SISWA: 'Siswa',
+  SUPER_ADMIN: 'Super Admin',
+  ADMIN: 'School Administrator',
+  KEPALA_SEKOLAH: 'Principal',
+  VP_KESISWAAN: 'Vice Principal of Student Affairs',
+  WALI_KELAS: 'Homeroom Teacher',
+  GURU: 'Faculty Teacher',
+  GURU_JAGA: 'Duty Teacher',
+  ORANG_TUA: 'Parent/Guardian',
+  SISWA: 'Student',
 };
 
 /**

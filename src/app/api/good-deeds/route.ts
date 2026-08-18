@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
+import { emitSocketEvent } from '@/lib/socket-server';
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +20,9 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
 
-    const where: any = {};
+    // Per-school isolation: only this school's good deeds.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.studentWhere };
     if (studentId) where.studentId = studentId;
     if (categoryId) where.categoryId = categoryId;
     if (startDate && endDate) {
@@ -64,6 +68,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 });
     }
 
+    // Per-school isolation: the student must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id: studentId, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     const category = await db.goodDeedCategory.findUnique({ where: { id: categoryId } });
     const pointValue = points || category?.defaultPoints || 5;
 
@@ -92,6 +103,8 @@ export async function POST(request: NextRequest) {
       data: { totalGoodPoints: { increment: pointValue } },
     });
 
+    emitSocketEvent('good-deed:new', { goodDeed });
+
     return NextResponse.json({ goodDeed }, { status: 201 });
   } catch (error) {
     console.error('Create good deed error:', error);
@@ -111,7 +124,9 @@ export async function DELETE(request: NextRequest) {
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
-    const goodDeed = await db.goodDeed.findUnique({ where: { id } });
+    // Per-school isolation: good deed must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    const goodDeed = await db.goodDeed.findFirst({ where: { id, ...scope.studentWhere } });
     if (!goodDeed) return NextResponse.json({ error: 'Kebaikan tidak ditemukan' }, { status: 404 });
 
     await db.student.update({

@@ -24,6 +24,9 @@ node_modules
 .DS_Store
 *.pem
 
+# generated prisma client
+/src/generated/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
@@ -51,4 +54,4 @@ prompt
 
 server.log
 # Skills directory
-/skills/
+/skills/.freebuff/

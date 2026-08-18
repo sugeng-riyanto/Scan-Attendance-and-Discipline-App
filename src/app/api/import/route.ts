@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hashPassword, getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 import { generateQRString } from '@/lib/qr-utils';
+import { logAudit } from '@/lib/audit';
 import * as XLSX from 'xlsx';
 
 export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN'])) {
+    if (!requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN', 'SUPER_ADMIN'])) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const formData = await request.formData();
@@ -33,15 +35,20 @@ export async function POST(request: NextRequest) {
 
     let imported = 0;
     let errors: string[] = [];
+    let schoolsCreated = 0;
+
+    // Per-school isolation: imported students/classes bind to the actor's school.
+    const scope = await getSchoolScope(auth);
 
     switch (type) {
       case 'students':
-        const result = await importStudents(rows, classId, academicYearId);
+        const result = await importStudents(rows, classId, academicYearId, scope, auth);
         imported = result.imported;
         errors = result.errors;
+        schoolsCreated = result.schoolsCreated;
         break;
       case 'users':
-        const userResult = await importUsers(rows);
+        const userResult = await importUsers(rows, scope?.schoolId);
         imported = userResult.imported;
         errors = userResult.errors;
         break;
@@ -59,9 +66,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Tipe import tidak valid' }, { status: 400 });
     }
 
+    await logAudit({
+      action: 'IMPORT',
+      category: 'IMPORT',
+      severity: 'INFO',
+      userId: auth.userId,
+      username: auth.username,
+      role: auth.role,
+      details: `Import ${type}: ${imported} data${schoolsCreated ? `, ${schoolsCreated} sekolah baru dibuat` : ''} (${errors.length} error)`,
+    });
+
     return NextResponse.json({
-      message: `Berhasil import ${imported} data`,
+      message: `Berhasil import ${imported} data${schoolsCreated ? ` · ${schoolsCreated} sekolah baru dibuat` : ''}`,
       imported,
+      schoolsCreated,
       errors: errors.length > 0 ? errors.slice(0, 20) : undefined,
     });
   } catch (error: any) {
@@ -70,9 +88,91 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function importStudents(rows: Record<string, any>[], classId?: string, academicYearId?: string) {
+type ImportScope = { schoolId: string | null; isSuperAdmin: boolean; schoolWhere: Record<string, unknown> };
+
+/**
+ * Resolve the school a student row targets, based on the `Kode Sekolah` column.
+ *  - Empty code  -> the actor's own school (SUPER_ADMIN falls back to the first school).
+ *  - Known code  -> that school, but non-super-admins may only target their own school.
+ *  - Unknown code -> ONLY SUPER_ADMIN: creates the school on the fly (fresh provisioning:
+ *    school + 30-day TRIAL subscription), so a single students upload fully provisions
+ *    a new school (school, classes, students, parent accounts).
+ * Results are cached per upload so repeated rows never create duplicates.
+ */
+async function resolveImportSchool(
+  code: string,
+  name: string,
+  scope: ImportScope,
+  cache: Map<string, { id: string } | 'invalid'>,
+  auth: any
+): Promise<{ schoolId: string; created: boolean } | { error: string }> {
+  const normalized = code.trim().toUpperCase();
+  if (cache.has(normalized)) {
+    const hit = cache.get(normalized)!;
+    if (hit === 'invalid') return { error: `Kode sekolah "${code}" tidak dapat digunakan` };
+    return { schoolId: hit.id, created: false };
+  }
+
+  if (!normalized) {
+    // Actor's own school; SUPER_ADMIN without a school falls back to the first school.
+    let schoolId = scope.schoolId;
+    if (!schoolId) {
+      const defaultSchool = await db.school.findFirst({ orderBy: { createdAt: 'asc' } });
+      schoolId = defaultSchool ? defaultSchool.id : null;
+    }
+    if (!schoolId) {
+      cache.set(normalized, 'invalid');
+      return { error: 'Tidak ada sekolah untuk import siswa' };
+    }
+    cache.set(normalized, { id: schoolId });
+    return { schoolId, created: false };
+  }
+
+  const school = await db.school.findUnique({ where: { code: normalized } });
+  if (school) {
+    // Isolation: a school-bound actor can only import into their own school.
+    if (!scope.isSuperAdmin && scope.schoolId && school.id !== scope.schoolId) {
+      cache.set(normalized, 'invalid');
+      return { error: `Kode sekolah "${code}" milik sekolah lain` };
+    }
+    cache.set(normalized, { id: school.id });
+    return { schoolId: school.id, created: false };
+  }
+
+  // Unknown code -> fresh-school provisioning is a SUPER_ADMIN capability.
+  if (!scope.isSuperAdmin) {
+    cache.set(normalized, 'invalid');
+    return { error: `Kode sekolah "${code}" tidak ditemukan` };
+  }
+
+  const newSchool = await db.school.create({
+    data: { code: normalized, name: name || `Sekolah ${normalized}`, address: null, isActive: true },
+  });
+  const periodStart = new Date();
+  const periodEnd = new Date(Date.now() + 30 * 86400000);
+  await db.subscription.create({
+    data: { schoolId: newSchool.id, plan: 'YEARLY', status: 'TRIAL', periodStart, periodEnd, notes: 'Masa percobaan 30 hari' },
+  });
+  const ip = auth?.ip || null;
+  await logAudit({
+    action: 'SCHOOL_CREATE',
+    category: 'SETTINGS',
+    severity: 'INFO',
+    userId: auth?.userId,
+    username: auth?.username,
+    role: auth?.role,
+    ip,
+    details: `Sekolah baru dibuat lewat import siswa: ${newSchool.name} (${newSchool.code})`,
+  });
+  cache.set(normalized, { id: newSchool.id });
+  return { schoolId: newSchool.id, created: true };
+}
+
+async function importStudents(rows: Record<string, any>[], classId?: string, academicYearId?: string, scope?: ImportScope, auth?: any) {
   let imported = 0;
+  let schoolsCreated = 0;
   const errors: string[] = [];
+  const schoolCache = new Map<string, { id: string } | 'invalid'>();
 
   // Get active academic year if not provided
   let activeYear = academicYearId;
@@ -81,7 +181,7 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
     if (year) activeYear = year.id;
     else {
       errors.push('Tidak ada tahun ajaran aktif');
-      return { imported, errors };
+      return { imported, errors, schoolsCreated };
     }
   }
 
@@ -90,32 +190,56 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
       const nisn = String(row['NISN'] || row['nisn'] || '').trim();
       const name = String(row['Nama Siswa'] || row['Nama'] || row['nama'] || '').trim();
       const className = String(row['Kelas'] || row['kelas'] || '').trim();
+      // Jenjang (JHS/SHS) — when present, it drives the class level so the
+      // database adapts (JHS -> SMP, SHS -> SMA) regardless of class naming.
+      const jenjang = String(row['Jenjang'] || row['jenjang'] || '').trim().toUpperCase();
       const gender = String(row['Jenis Kelamin'] || row['Gender'] || row['gender'] || '').trim();
       const parentName = String(row['Nama Orang Tua'] || row['Orang Tua'] || row['ortu'] || '').trim();
       const address = String(row['Alamat'] || row['alamat'] || '').trim();
       const email = String(row['Email'] || row['email'] || '').trim();
       const phone = String(row['No HP'] || row['Phone'] || row['phone'] || '').trim();
+      // Multi-tenant provisioning: Kode Sekolah (kosong = sekolah pengimpor);
+      // kode yang belum ada otomatis membuat sekolah baru (khusus SUPER_ADMIN).
+      const schoolCode = String(row['Kode Sekolah'] || row['Kode'] || '').trim();
+      const schoolName = String(row['Nama Sekolah'] || row['Nama Sekolah Baru'] || '').trim();
 
       if (!nisn || !name) {
         errors.push(`Baris dilewati: NISN atau Nama kosong`);
         continue;
       }
 
+      // Resolve the target school (may create it for a fresh school code).
+      const resolved = await resolveImportSchool(schoolCode, schoolName, scope!, schoolCache, auth);
+      if ('error' in resolved) {
+        errors.push(`${name}: ${resolved.error}`);
+        continue;
+      }
+      const schoolId = resolved.schoolId;
+      if (resolved.created) schoolsCreated++;
+
       // Find or create class
       let studentClassId = classId;
       if (!studentClassId && className) {
         const existingClass = await db.class.findFirst({
-          where: { name: className, academicYearId: activeYear }
+          where: { name: className, academicYearId: activeYear, schoolId }
         });
         if (existingClass) {
           studentClassId = existingClass.id;
         } else {
-          // Auto-create class
-          const level = className.match(/^\d+/)?.[0] || '7';
+          // Auto-create class. Prefer the explicit Jenjang column (JHS/SHS);
+          // fall back to the leading digits of the class name (<=9 -> SMP).
+          let level = 'SMP';
+          if (jenjang === 'JHS') level = 'SMP';
+          else if (jenjang === 'SHS') level = 'SMA';
+          else {
+            const digits = className.match(/^\d+/)?.[0];
+            level = digits ? (parseInt(digits) <= 9 ? 'SMP' : 'SMA') : 'SMP';
+          }
           const newClass = await db.class.create({
             data: {
               name: className,
-              level: parseInt(level) <= 9 ? 'SMP' : 'SMA',
+              level,
+              schoolId,
               academicYearId: activeYear!,
             }
           });
@@ -131,6 +255,11 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
       // Check if student already exists
       const existing = await db.student.findUnique({ where: { nisn } });
       if (existing) {
+        // Never let an import mutate a student from another school.
+        if (existing.schoolId !== schoolId) {
+          errors.push(`${name}: NISN sudah terdaftar di sekolah lain`);
+          continue;
+        }
         // Update existing student
         await db.student.update({
           where: { nisn },
@@ -148,6 +277,7 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
           password: hashedPw,
           name,
           role: 'SISWA',
+          schoolId,
         }
       });
 
@@ -157,6 +287,7 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
         data: {
           nisn,
           name,
+          schoolId,
           classId: studentClassId,
           academicYearId: activeYear!,
           userId: user.id,
@@ -181,6 +312,7 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
               password: parentPw,
               name: parentName,
               role: 'ORANG_TUA',
+              schoolId,
             }
           });
 
@@ -203,10 +335,10 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
     }
   }
 
-  return { imported, errors };
+  return { imported, errors, schoolsCreated };
 }
 
-async function importUsers(rows: Record<string, any>[]) {
+async function importUsers(rows: Record<string, any>[], actorSchoolId?: string | null) {
   let imported = 0;
   const errors: string[] = [];
 
@@ -217,6 +349,8 @@ async function importUsers(rows: Record<string, any>[]) {
       const role = String(row['Role'] || row['role'] || '').trim().toUpperCase().replace(/ /g, '_');
       const nip = String(row['NIP'] || row['nip'] || '').trim();
       const className = String(row['Nama Kelas'] || row['Kelas'] || '').trim();
+      // Multi-tenant: Kode Sekolah (kosong = sekolah default / milik pengimpor).
+      const schoolCode = String(row['Kode Sekolah'] || row['Kode'] || '').trim();
 
       if (!username || !name || !role) {
         errors.push('Baris dilewati: Username, Nama, atau Role kosong');
@@ -224,11 +358,34 @@ async function importUsers(rows: Record<string, any>[]) {
       }
 
       // Validate role
-      const validRoles = ['KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'ADMIN'];
+      const validRoles = ['KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'ADMIN', 'GURU_JAGA', 'ORANG_TUA', 'SISWA'];
       const normalizedRole = validRoles.find(r => r === role || r.replace('_', ' ') === role);
       if (!normalizedRole) {
         errors.push(`${name}: Role "${role}" tidak valid`);
         continue;
+      }
+      if (normalizedRole === 'SUPER_ADMIN') {
+        errors.push(`${name}: Role SUPER_ADMIN tidak dapat diimpor`);
+        continue;
+      }
+
+      // Resolve school (multi-tenant). Empty school code -> the actor's school
+      // (falls back to the first school by creation order) so plain uploads
+      // keep working and never cross schools.
+      let schoolId: string | null = null;
+      if (schoolCode) {
+        const school = await db.school.findUnique({ where: { code: schoolCode } });
+        if (!school) {
+          errors.push(`${name}: Kode sekolah "${schoolCode}" tidak ditemukan`);
+          continue;
+        }
+        schoolId = school.id;
+      } else {
+        schoolId = actorSchoolId ?? null;
+        if (!schoolId) {
+          const defaultSchool = await db.school.findFirst({ orderBy: { createdAt: 'asc' } });
+          schoolId = defaultSchool ? defaultSchool.id : null;
+        }
       }
 
       // Check if user exists
@@ -236,7 +393,7 @@ async function importUsers(rows: Record<string, any>[]) {
       if (existing) {
         await db.user.update({
           where: { username },
-          data: { name, role: normalizedRole },
+          data: { name, role: normalizedRole, schoolId },
         });
         imported++;
         continue;
@@ -250,6 +407,7 @@ async function importUsers(rows: Record<string, any>[]) {
           password: hashedPw,
           name,
           role: normalizedRole,
+          schoolId,
         }
       });
 

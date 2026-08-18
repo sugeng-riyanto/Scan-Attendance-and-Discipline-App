@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { exportToXLSX, createAttendanceExport, createViolationExport, createGoodDeedExport } from '@/lib/export-utils';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
+import { logAudit } from '@/lib/audit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,7 +23,9 @@ export async function GET(request: NextRequest) {
     const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
     const end = endDate ? new Date(endDate) : new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
-    const studentWhere: any = {};
+    // Per-school isolation: exports only cover this school's data.
+    const scope = await getSchoolScope(auth);
+    const studentWhere: any = { ...scope.schoolWhere };
     if (classId && classId !== 'all') studentWhere.classId = classId;
 
     let buffer: Buffer;
@@ -83,6 +87,8 @@ export async function GET(request: NextRequest) {
         break;
       }
     }
+
+    await logAudit({ action: 'EXPORT', category: 'EXPORT', severity: 'INFO', userId: auth.userId, username: auth.username, role: auth.role, details: `Ekspor ${type} (${startDate || 'awal bulan'} s.d. ${endDate || 'sekarang'})` });
 
     return new NextResponse(Buffer.from(buffer), {
       headers: {

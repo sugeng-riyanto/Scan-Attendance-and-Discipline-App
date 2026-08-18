@@ -34,7 +34,7 @@ export function ViolationsPage() {
   const effectiveClassFilter = user?.role === 'WALI_KELAS' && myClass ? myClass.id : classFilter
 
   const { data: violData, loading, refetch } = useApiFetch<{ violations: ViolationRecord[] }>(
-    `/api/violations?classId=${effectiveClassFilter !== 'all' ? effectiveClassFilter : ''}`, [effectiveClassFilter]
+    `/api/violations?classId=${effectiveClassFilter !== 'all' ? effectiveClassFilter : ''}`, [effectiveClassFilter], ['violation:update']
   )
 
   const violations = violData?.violations || []
@@ -68,7 +68,7 @@ export function ViolationsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">Pelanggaran</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Pelanggaran</h2>
         <div className="flex gap-2">
           {(user?.role === 'ADMIN' || user?.role === 'VP_KESISWAAN') && (
             <ImportXlsxButton type="violation-categories" onDone={refetch} />

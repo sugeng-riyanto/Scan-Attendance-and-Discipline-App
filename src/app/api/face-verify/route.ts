@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 // Euclidean distance between two 128-dim vectors
 function euclideanDistance(a: number[], b: number[]): number {
@@ -26,7 +27,8 @@ export async function POST(request: NextRequest) {
 
     // If descriptor is provided, use descriptor-based matching (fast, local math)
     if (descriptor && Array.isArray(descriptor) && descriptor.length === 128) {
-      return handleDescriptorMatch(descriptor, { nisn, studentId, autoDetect, latitude, longitude, accuracy });
+      const scope = await getSchoolScope(auth);
+      return handleDescriptorMatch(descriptor, { nisn, studentId, autoDetect, latitude, longitude, accuracy, schoolId: scope.isSuperAdmin ? null : scope.schoolId });
     }
 
     // Fallback: if no descriptor but capturedPhoto provided, return error asking for descriptor
@@ -49,15 +51,16 @@ export async function POST(request: NextRequest) {
 
 async function handleDescriptorMatch(
   descriptor: number[],
-  options: { nisn?: string; studentId?: string; autoDetect?: boolean; latitude?: number; longitude?: number; accuracy?: number }
+  options: { nisn?: string; studentId?: string; autoDetect?: boolean; latitude?: number; longitude?: number; accuracy?: number; schoolId?: string | null }
 ) {
-  const { nisn, studentId, autoDetect } = options;
+  const { nisn, studentId, autoDetect, schoolId } = options;
 
-  // Get all active face references with descriptors
+  // Get active face references with descriptors, scoped to the user's school.
   const references = await db.faceReference.findMany({
     where: {
       isActive: true,
       faceDescriptor: { not: null },
+      ...(schoolId ? { student: { schoolId } } : {}),
     },
     include: {
       student: {

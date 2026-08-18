@@ -1,12 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export interface SchoolBranding {
+  id: string;
+  code: string;
+  name: string;
+  address: string | null;
+  logo: string | null;
+  themeColor: string | null;
+}
+
 export interface AuthUser {
   id: string;
   username: string;
   name: string;
   role: string;
   avatar?: string;
+  termsAccepted?: boolean;
+  school?: SchoolBranding | null;
 }
 
 interface AuthState {

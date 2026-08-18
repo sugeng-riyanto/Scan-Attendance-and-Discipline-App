@@ -76,7 +76,7 @@ export function DisciplinePatternPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Pola Disiplin</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Pola Disiplin</h2>
 
       <Card>
         <CardContent className="p-4">

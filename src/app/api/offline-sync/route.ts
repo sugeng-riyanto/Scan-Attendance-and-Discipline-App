@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 import { getBehaviorLevel } from '@/lib/attendance-utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -42,6 +43,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Per-school isolation: every synced item must reference this school's data.
+    const scope = await getSchoolScope(auth);
+
     for (const item of items) {
       try {
         // Validate required fields
@@ -63,6 +67,21 @@ export async function POST(request: NextRequest) {
             `Invalid JSON payload for ${item.entity}:${item.action}${item.tempId ? ` [tempId: ${item.tempId}]` : ''}`
           );
           continue;
+        }
+
+        // Per-school isolation: the payload's studentId must belong to the actor's school.
+        if (scope.schoolId && payload?.studentId) {
+          const owned = await db.student.findFirst({
+            where: { id: String(payload.studentId), ...scope.schoolWhere },
+            select: { id: true },
+          });
+          if (!owned) {
+            result.failed++;
+            result.errors.push(
+              `Siswa ${String(payload.studentId)} tidak ditemukan di sekolah Anda (${item.entity}:${item.action})`
+            );
+            continue;
+          }
         }
 
         // Route to the appropriate handler

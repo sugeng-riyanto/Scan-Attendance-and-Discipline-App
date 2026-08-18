@@ -23,9 +23,13 @@ import { Progress } from '@/components/ui/progress'
 import { toast } from 'sonner'
 import { Save, Plus, RefreshCw, Edit, Trash2, Camera, Upload, GraduationCap, Image, CheckCircle, XCircle, Lock, Copy, Volume2, Globe, Sun, Eye } from 'lucide-react'
 import { Student, ClassInfo, AcademicYearInfo, CategoryInfo, GeofenceConfig, CategoriesResponse } from './types'
+import { DismissalEvent, NationalHoliday, DEFAULT_DISMISSAL_TIMES, DEFAULT_WORK_DAYS } from '@/lib/types'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { ImportXlsxButton } from './import-xlsx-button'
 import { FaceCaptureSection } from './siswa-dashboard'
+import { AccountSettings } from './account-settings'
+import { SchoolProfileSettings } from './school-profile-settings'
+import { SubscriptionHistoryList } from './subscription-history-list'
 
 function SchoolSettings({ themeColor }: { themeColor: string }) {
   const [config, setConfig] = useState({ school_name: '', school_address: '', school_logo: '', theme_color: '#10b981', timezone: 'Asia/Jakarta', checkin_cutoff_hour: '7' })
@@ -41,8 +45,8 @@ function SchoolSettings({ themeColor }: { themeColor: string }) {
       const map: Record<string, string> = {}
       data.configs.forEach(c => { map[c.key] = c.value })
       setConfig({
-        school_name: map.school_name || 'SMP-SMA Nusantara',
-        school_address: map.school_address || 'Jl. Pendidikan No. 1, Indonesia',
+        school_name: map.school_name || 'Attendance Application',
+        school_address: map.school_address || 'Jl. Pala Raya No. 51, Pamulang, Tangerang Selatan, Banten',
         school_logo: map.school_logo || '',
         theme_color: map.theme_color || '#10b981',
         timezone: map.timezone || 'Asia/Jakarta',
@@ -61,7 +65,7 @@ function SchoolSettings({ themeColor }: { themeColor: string }) {
           body: JSON.stringify({ key, value, description: key })
         })
       }
-      toast.success('Pengaturan sekolah disimpan')
+      toast.success('School settings saved')
     } catch (err: any) { toast.error(err.message) }
     finally { setSaving(false) }
   }
@@ -78,39 +82,39 @@ function SchoolSettings({ themeColor }: { themeColor: string }) {
 
   return (
     <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-base">Informasi Sekolah</CardTitle></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-base">School Information</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <div><Label>Nama Sekolah</Label>
+        <div><Label>School Name</Label>
           <Input value={config.school_name} onChange={e => setConfig(p => ({ ...p, school_name: e.target.value }))} />
         </div>
-        <div><Label>Alamat Sekolah</Label>
+        <div><Label>School Address</Label>
           <Input value={config.school_address} onChange={e => setConfig(p => ({ ...p, school_address: e.target.value }))} />
         </div>
         <div>
-          <Label>Logo Sekolah</Label>
+          <Label>School Logo</Label>
           <div className="flex items-center gap-3 mt-1">
             {config.school_logo ? (
               <img src={config.school_logo} alt="Logo" className="h-16 w-16 rounded-lg border object-contain p-1" />
             ) : (
-              <div className="h-16 w-16 rounded-lg border bg-gray-50 flex items-center justify-center">
+              <div className="h-16 w-16 rounded-lg border bg-gray-50 dark:bg-gray-800 flex items-center justify-center">
                 <GraduationCap className="h-8 w-8 text-gray-300" />
               </div>
             )}
             <div>
               <input type="file" accept="image/*" className="hidden" id="logo-upload" onChange={handleLogoUpload} />
               <Button variant="outline" size="sm" onClick={() => document.getElementById('logo-upload')?.click()}>
-                <Upload className="h-4 w-4 mr-1" /> Upload Logo
+                <Upload className="h-4 w-4 mr-1" /> Upload
               </Button>
               {config.school_logo && (
                 <Button variant="ghost" size="sm" className="ml-2 text-red-500" onClick={() => setConfig(p => ({ ...p, school_logo: '' }))}>
-                  Hapus
+                  Remove
                 </Button>
               )}
             </div>
           </div>
         </div>
         <div>
-          <Label>Warna Tema</Label>
+          <Label>Theme Color</Label>
           <div className="flex items-center gap-3 mt-1">
             <input type="color" value={config.theme_color} onChange={e => setConfig(p => ({ ...p, theme_color: e.target.value }))}
               className="h-10 w-10 rounded border cursor-pointer" />
@@ -121,7 +125,7 @@ function SchoolSettings({ themeColor }: { themeColor: string }) {
         </div>
         <Separator />
         <div>
-          <Label>Zona Waktu</Label>
+          <Label>Timezone</Label>
           <Select value={config.timezone} onValueChange={v => setConfig(p => ({ ...p, timezone: v }))}>
             <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -132,7 +136,7 @@ function SchoolSettings({ themeColor }: { themeColor: string }) {
           </Select>
         </div>
         <div>
-          <Label>Jam Batas Check-in (Terlambat setelah jam ini)</Label>
+          <Label>Check-in Cutoff (Late after this time)</Label>
           <Select value={config.checkin_cutoff_hour} onValueChange={v => setConfig(p => ({ ...p, checkin_cutoff_hour: v }))}>
             <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -143,7 +147,7 @@ function SchoolSettings({ themeColor }: { themeColor: string }) {
           </Select>
         </div>
         <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave} disabled={saving}>
-          {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Simpan
+          {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Save
         </Button>
       </CardContent>
     </Card>
@@ -183,23 +187,23 @@ function SiswaSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleSave = async () => {
-    if (!form.nisn || !form.name || !form.classId) { toast.error('NISN, Nama, dan Kelas wajib diisi'); return }
+    if (!form.nisn || !form.name || !form.classId) { toast.error('NISN, Name, and Class are required'); return }
     try {
       if (editId) {
         await apiFetch('/api/students', {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: editId, ...form })
         })
-        toast.success('Siswa diperbarui')
+        toast.success('Student updated')
       } else {
         const qrCode = generateQRString(form.nisn)
         const academicYearId = classes.find(c => c.id === form.classId)?.academicYearId || ''
-        if (!academicYearId) { toast.error('Pilih kelas yang valid'); return }
+        if (!academicYearId) { toast.error('Select a valid class'); return }
         await apiFetch('/api/students', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...form, qrCode, academicYearId })
         })
-        toast.success('Siswa ditambahkan (login: student_' + form.nisn + ' / ' + form.nisn + ')')
+        toast.success('Student added (login: student_' + form.nisn + ' / ' + form.nisn + ')')
       }
       setShowForm(false); setEditId(null)
       setForm({ nisn: '', name: '', classId: '', gender: 'L', address: '', email: '', phone: '', status: 'AKTIF', photoBase64: '' })
@@ -214,8 +218,8 @@ function SiswaSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Hapus siswa ini?')) return
-    try { await apiFetch(`/api/students?id=${id}`, { method: 'DELETE' }); toast.success('Siswa dihapus'); fetchStudents() }
+    if (!confirm('Delete this student?')) return
+    try { await apiFetch(`/api/students?id=${id}`, { method: 'DELETE' }); toast.success('Student deleted'); fetchStudents() }
     catch (err: any) { toast.error(err.message) }
   }
 
@@ -231,20 +235,20 @@ function SiswaSettings({ themeColor }: { themeColor: string }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <CardTitle className="text-base">Manajemen Siswa ({students.length})</CardTitle>
+          <CardTitle className="text-base">Student Management ({students.length})</CardTitle>
           <div className="flex gap-2">
             <ImportXlsxButton type="students" onDone={fetchStudents} />
             <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={() => { setEditId(null); setForm({ nisn: '', name: '', classId: '', gender: 'L', address: '', email: '', phone: '', status: 'AKTIF', photoBase64: '' }); setShowForm(true) }}>
-              <Plus className="h-4 w-4 mr-1" /> Tambah
+              <Plus className="h-4 w-4 mr-1" /> Add
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        <Input placeholder="Cari nama/NISN..." value={search} onChange={e => setSearch(e.target.value)} className="mb-3" />
+        <Input placeholder="Search name/NISN..." value={search} onChange={e => setSearch(e.target.value)} className="mb-3" />
 
         {showForm && (
-          <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">NISN</Label>
@@ -256,7 +260,7 @@ function SiswaSettings({ themeColor }: { themeColor: string }) {
               <div><Label className="text-xs">Nama</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></div>
               <div className="col-span-2">
                 <Label className="text-xs">Kelas</Label>
-                <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1 bg-white">
+                <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1 bg-white dark:bg-gray-800">
                   {classes.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">Tidak ada kelas tersedia</p>}
                   {classes.map(c => (
                     <button key={c.id} type="button"
@@ -302,8 +306,8 @@ function SiswaSettings({ themeColor }: { themeColor: string }) {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Simpan</Button>
-              <Button variant="outline" onClick={() => setShowForm(false)}>Batal</Button>
+              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Save</Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}> Cancel</Button>
             </div>
           </div>
         )}
@@ -377,13 +381,13 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
   })
 
   const handleCreate = async () => {
-    if (!form.username || !form.name || !form.password) { toast.error('Lengkapi semua field'); return }
+    if (!form.username || !form.name || !form.password) { toast.error('Please fill in all fields'); return }
     try {
       await apiFetch('/api/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       })
-      toast.success('Pengguna ditambahkan')
+      toast.success('User added')
       setShowForm(false)
       setForm({ username: '', name: '', role: 'GURU', password: '' })
       refetch()
@@ -404,7 +408,7 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData)
       })
-      toast.success('Pengguna diperbarui')
+      toast.success('User updated')
       setShowForm(false)
       setEditId(null)
       setForm({ username: '', name: '', role: 'GURU', password: '' })
@@ -413,20 +417,20 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Nonaktifkan pengguna ini?')) return
-    try { await apiFetch(`/api/users?id=${id}`, { method: 'DELETE' }); toast.success('Pengguna dinonaktifkan'); refetch() }
+    if (!confirm('Deactivate this user?')) return
+    try { await apiFetch(`/api/users?id=${id}`, { method: 'DELETE' }); toast.success('User deactivated'); refetch() }
     catch (err: any) { toast.error(err.message) }
   }
 
   const handleResetPassword = async (u: any) => {
     const defaultPw = u.username + '123'
-    if (!confirm(`Reset password ${u.name} menjadi "${defaultPw}"?`)) return
+    if (!confirm(`Reset ${u.name}'s password to "${defaultPw}"?`)) return
     try {
       await apiFetch('/api/users', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: u.id, password: defaultPw })
       })
-      toast.success(`Password ${u.name} direset ke ${defaultPw}`)
+      toast.success(`${u.name}'s password reset to ${defaultPw}`)
     } catch (err: any) { toast.error(err.message) }
   }
 
@@ -434,58 +438,58 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Manajemen Pengguna ({users.length})</CardTitle>
+          <CardTitle className="text-base">User Management ({users.length})</CardTitle>
           <div className="flex gap-2">
             <ImportXlsxButton type="users" onDone={refetch} />
             <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={() => { setEditId(null); setForm({ username: '', name: '', role: 'GURU', password: '' }); setShowForm(true) }}>
-              <Plus className="h-4 w-4 mr-1" /> Tambah
+              <Plus className="h-4 w-4 mr-1" /> Add
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="flex gap-2 mb-3">
-          <Input placeholder="Cari nama/username..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
+          <Input placeholder="Search name/username..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
           <Select value={roleFilter} onValueChange={setRoleFilter}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">Semua Role</SelectItem>
+              <SelectItem value="ALL">All Roles</SelectItem>
               <SelectItem value="ADMIN">Admin</SelectItem>
-              <SelectItem value="KEPALA_SEKOLAH">Kepala Sekolah</SelectItem>
-              <SelectItem value="VP_KESISWAAN">Wakasek Kesiswaan</SelectItem>
-              <SelectItem value="WALI_KELAS">Wali Kelas</SelectItem>
-              <SelectItem value="GURU">Guru</SelectItem>
-              <SelectItem value="GURU_JAGA">Guru Jaga</SelectItem>
-              <SelectItem value="ORANG_TUA">Orang Tua</SelectItem>
-              <SelectItem value="SISWA">Siswa</SelectItem>
+              <SelectItem value="KEPALA_SEKOLAH">Principal</SelectItem>
+              <SelectItem value="VP_KESISWAAN">Vice Principal for Student Affairs</SelectItem>
+              <SelectItem value="WALI_KELAS">Homeroom Teacher</SelectItem>
+              <SelectItem value="GURU">Teacher</SelectItem>
+              <SelectItem value="GURU_JAGA">Duty Teacher</SelectItem>
+              <SelectItem value="ORANG_TUA">Parent</SelectItem>
+              <SelectItem value="SISWA">Student</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         {showForm && (
-          <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Username</Label><Input value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))} disabled={!!editId} /></div>
-              <div><Label className="text-xs">Nama</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></div>
+              <div><Label className="text-xs">Name</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></div>
               <div><Label className="text-xs">Role</Label>
                 <Select value={form.role} onValueChange={v => setForm(p => ({ ...p, role: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="KEPALA_SEKOLAH">Kepala Sekolah</SelectItem>
-                    <SelectItem value="VP_KESISWAAN">Wakasek Kesiswaan</SelectItem>
-                    <SelectItem value="WALI_KELAS">Wali Kelas</SelectItem>
-                    <SelectItem value="GURU">Guru</SelectItem>
-                    <SelectItem value="GURU_JAGA">Guru Jaga</SelectItem>
-                    <SelectItem value="ORANG_TUA">Orang Tua</SelectItem>
-                    <SelectItem value="SISWA">Siswa</SelectItem>
+                    <SelectItem value="KEPALA_SEKOLAH">Principal</SelectItem>
+                    <SelectItem value="VP_KESISWAAN">Vice Principal for Student Affairs</SelectItem>
+                    <SelectItem value="WALI_KELAS">Homeroom Teacher</SelectItem>
+                    <SelectItem value="GURU">Teacher</SelectItem>
+                    <SelectItem value="GURU_JAGA">Duty Teacher</SelectItem>
+                    <SelectItem value="ORANG_TUA">Parent</SelectItem>
+                    <SelectItem value="SISWA">Student</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               {!editId && <div><Label className="text-xs">Password</Label><Input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} /></div>}
             </div>
             <div className="flex gap-2">
-              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={editId ? handleUpdate : handleCreate}><Save className="h-4 w-4 mr-1" /> {editId ? 'Perbarui' : 'Simpan'}</Button>
-              <Button variant="outline" onClick={() => { setShowForm(false); setEditId(null) }}>Batal</Button>
+              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={editId ? handleUpdate : handleCreate}><Save className="h-4 w-4 mr-1" /> {editId ? 'Update' : 'Save'}</Button>
+              <Button variant="outline" onClick={() => { setShowForm(false); setEditId(null) }}>Cancel</Button>
             </div>
           </div>
         )}
@@ -495,12 +499,12 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs">Nama</TableHead>
+                  <TableHead className="text-xs">Name</TableHead>
                   <TableHead className="text-xs">Username</TableHead>
                   <TableHead className="text-xs">Role</TableHead>
                   <TableHead className="text-xs hidden md:table-cell">Info</TableHead>
                   <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs">Aksi</TableHead>
+                  <TableHead className="text-xs">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -510,8 +514,8 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
                     <TableCell className="text-xs py-1">{u.username}</TableCell>
                     <TableCell className="text-xs py-1"><Badge variant="outline">{roleLabels[u.role] || u.role}</Badge></TableCell>
                     <TableCell className="text-xs py-1 hidden md:table-cell text-muted-foreground">
-                      {u.student && <span>Siswa: {u.student.name}</span>}
-                      {u.homeroomOf && <span>Wali: {u.homeroomOf.name}</span>}
+                      {u.student && <span>Student: {u.student.name}</span>}
+                      {u.homeroomOf && <span>Homeroom: {u.homeroomOf.name}</span>}
                       {u.teacher && <span>NIP: {u.teacher.nip || '-'}</span>}
                     </TableCell>
                     <TableCell className="py-1">{u.isActive ? <CheckCircle className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-red-500" />}</TableCell>
@@ -519,7 +523,7 @@ function UsersSettings({ themeColor }: { themeColor: string }) {
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEdit(u)} title="Edit"><Edit className="h-3 w-3" /></Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-500" onClick={() => handleResetPassword(u)} title="Reset Password"><Lock className="h-3 w-3" /></Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => handleDelete(u.id)} title="Nonaktifkan"><Trash2 className="h-3 w-3" /></Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => handleDelete(u.id)} title="Deactivate"><Trash2 className="h-3 w-3" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -555,7 +559,7 @@ function KelasSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleSave = async () => {
-    if (!form.name || !form.level) { toast.error('Nama dan Jenjang wajib diisi'); return }
+    if (!form.name || !form.level) { toast.error('Name and Level are required'); return }
     try {
       const saveData = { ...form, homeroomTeacherId: form.homeroomTeacherId === 'NONE' ? '' : form.homeroomTeacherId }
       if (editId) {
@@ -563,13 +567,13 @@ function KelasSettings({ themeColor }: { themeColor: string }) {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: editId, ...saveData })
         })
-        toast.success('Kelas diperbarui')
+        toast.success('Class updated')
       } else {
         await apiFetch('/api/classes', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(saveData)
         })
-        toast.success('Kelas ditambahkan')
+        toast.success('Class added')
       }
       setShowForm(false); setEditId(null)
       setForm({ name: '', level: 'SMP', academicYearId: '', homeroomTeacherId: 'NONE' })
@@ -577,19 +581,24 @@ function KelasSettings({ themeColor }: { themeColor: string }) {
     } catch (err: any) { toast.error(err.message) }
   }
 
+  const handleEdit = (c: ClassInfo) => {
+    setEditId(c.id)
+    setForm({ name: c.name, level: c.level === 'SMA' ? 'SMA' : 'SMP', academicYearId: c.academicYearId || '', homeroomTeacherId: c.homeroomTeacherId || 'NONE' })
+    setShowForm(true)
+  }
+
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Manajemen Kelas ({classes.length})</CardTitle>
+          <CardTitle className="text-base">Class Management ({classes.length})</CardTitle>
           <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={() => { setEditId(null); setForm({ name: '', level: 'SMP', academicYearId: years.find(y => y.isActive)?.id || '', homeroomTeacherId: 'NONE' }); setShowForm(true) }}>
-            <Plus className="h-4 w-4 mr-1" /> Tambah
-          </Button>
+            <Plus className="h-4 w-4 mr-1" /> Add</Button>
         </div>
       </CardHeader>
       <CardContent>
         {showForm && (
-          <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Nama Kelas</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="7A, 10B..." /></div>
               <div><Label className="text-xs">Jenjang</Label>
@@ -615,8 +624,8 @@ function KelasSettings({ themeColor }: { themeColor: string }) {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Simpan</Button>
-              <Button variant="outline" onClick={() => setShowForm(false)}>Batal</Button>
+              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Save</Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}> Cancel</Button>
             </div>
           </div>
         )}
@@ -644,8 +653,8 @@ function KelasSettings({ themeColor }: { themeColor: string }) {
 }
 
 async function handleDelete(id: string) {
-  if (!confirm('Hapus item ini?')) return
-  try { await apiFetch(`/api/classes?id=${id}`, { method: 'DELETE' }); toast.success('Dihapus') }
+  if (!confirm('Delete this item?')) return
+  try { await apiFetch(`/api/classes?id=${id}`, { method: 'DELETE' }); toast.success('Deleted') }
   catch (err: any) { toast.error(err.message) }
 }
 
@@ -672,13 +681,13 @@ function CategoriesSettings({ themeColor }: { themeColor: string }) {
   const goodCats = categories.filter(c => !c.level)
 
   const handleSave = async () => {
-    if (!form.name || !form.code) { toast.error('Nama dan Kode wajib diisi'); return }
+    if (!form.name || !form.code) { toast.error('Name and Code are required'); return }
     try {
       await apiFetch('/api/categories', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: formType, ...form })
       })
-      toast.success('Kategori ditambahkan')
+      toast.success('Category added')
       setShowForm(false)
       setForm({ name: '', code: '', level: 'RINGAN', defaultPoints: 5, description: '' })
       fetchCategories()
@@ -686,8 +695,8 @@ function CategoriesSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleDeleteCat = async (type: string, id: string) => {
-    if (!confirm('Nonaktifkan kategori ini?')) return
-    try { await apiFetch(`/api/categories?type=${type}&id=${id}`, { method: 'DELETE' }); toast.success('Kategori dinonaktifkan'); fetchCategories() }
+    if (!confirm('Deactivate this category?')) return
+    try { await apiFetch(`/api/categories?type=${type}&id=${id}`, { method: 'DELETE' }); toast.success('Category deactivated'); fetchCategories() }
     catch (err: any) { toast.error(err.message) }
   }
 
@@ -695,18 +704,18 @@ function CategoriesSettings({ themeColor }: { themeColor: string }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Manajemen Kategori</CardTitle>
+          <CardTitle className="text-base">Category Management</CardTitle>
           <div className="flex gap-2">
             <ImportXlsxButton type="violation-categories" onDone={fetchCategories} />
             <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={() => { setFormType(tab === 'violation' ? 'violation' : 'good-deed'); setShowForm(true) }}>
-              <Plus className="h-4 w-4 mr-1" /> Tambah
+              <Plus className="h-4 w-4 mr-1" /> Add
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         {showForm && (
-          <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Kode</Label><Input value={form.code} onChange={e => setForm(p => ({ ...p, code: e.target.value }))} placeholder="PLG01" /></div>
               <div><Label className="text-xs">Nama</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></div>
@@ -731,16 +740,16 @@ function CategoriesSettings({ themeColor }: { themeColor: string }) {
             </div>
             <div><Label className="text-xs">Deskripsi</Label><Input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
             <div className="flex gap-2">
-              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Simpan</Button>
-              <Button variant="outline" onClick={() => setShowForm(false)}>Batal</Button>
+              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Save</Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}> Cancel</Button>
             </div>
           </div>
         )}
 
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full">
-            <TabsTrigger value="violation" className="flex-1">Pelanggaran ({violationCats.length})</TabsTrigger>
-            <TabsTrigger value="gooddeed" className="flex-1">Kebaikan ({goodCats.length})</TabsTrigger>
+            <TabsTrigger value="violation" className="flex-1">Violations ({violationCats.length})</TabsTrigger>
+            <TabsTrigger value="gooddeed" className="flex-1">Good Deeds ({goodCats.length})</TabsTrigger>
           </TabsList>
           <TabsContent value="violation">
             {loading ? <Skeleton className="h-32" /> : (
@@ -807,10 +816,10 @@ function GeofenceSettings({ themeColor }: { themeColor: string }) {
     try {
       if (form.id) {
         await apiFetch('/api/geofence', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-        toast.success('Geofence diperbarui')
+        toast.success('Geofence updated')
       } else {
         await apiFetch('/api/geofence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-        toast.success('Geofence dibuat')
+        toast.success('Geofence created')
       }
       setShowForm(false)
       setForm({ id: '', name: 'Area Sekolah', centerLat: -6.2088, centerLng: 106.8456, radiusMeters: 200, isActive: true, isDefault: true })
@@ -822,15 +831,14 @@ function GeofenceSettings({ themeColor }: { themeColor: string }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Konfigurasi Geofence</CardTitle>
+          <CardTitle className="text-base">Geofence Configuration</CardTitle>
           <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={() => { setForm({ id: '', name: 'Area Sekolah', centerLat: -6.2088, centerLng: 106.8456, radiusMeters: 200, isActive: true, isDefault: true }); setShowForm(true) }}>
-            <Plus className="h-4 w-4 mr-1" /> Tambah
-          </Button>
+            <Plus className="h-4 w-4 mr-1" /> Add</Button>
         </div>
       </CardHeader>
       <CardContent>
         {showForm && (
-          <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
             <div><Label>Nama Area</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-2">
               <div><Label>Latitude</Label><Input type="number" step="any" value={form.centerLat} onChange={e => setForm(p => ({ ...p, centerLat: parseFloat(e.target.value) || 0 }))} /></div>
@@ -842,8 +850,8 @@ function GeofenceSettings({ themeColor }: { themeColor: string }) {
               <div className="flex items-center gap-2"><Switch checked={form.isDefault} onCheckedChange={v => setForm(p => ({ ...p, isDefault: v }))} /><Label>Geofence Utama</Label></div>
             </div>
             <div className="flex gap-2">
-              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Simpan</Button>
-              <Button variant="outline" onClick={() => setShowForm(false)}>Batal</Button>
+              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Save</Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}> Cancel</Button>
             </div>
           </div>
         )}
@@ -862,7 +870,7 @@ function GeofenceSettings({ themeColor }: { themeColor: string }) {
                 </div>
                 <div className="flex gap-1">
                   <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => { setForm({ id: g.id, name: g.name, centerLat: g.centerLat, centerLng: g.centerLng, radiusMeters: g.radiusMeters, isActive: g.isActive, isDefault: g.isDefault }); setShowForm(true) }}><Edit className="h-4 w-4" /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400" onClick={async () => { if (!confirm('Hapus geofence ini?')) return; await apiFetch(`/api/geofence?id=${g.id}`, { method: 'DELETE' }); toast.success('Geofence dihapus'); fetchGeofences() }}><Trash2 className="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400" onClick={async () => { if (!confirm('Delete this geofence?')) return; await apiFetch(`/api/geofence?id=${g.id}`, { method: 'DELETE' }); toast.success('Geofence deleted'); fetchGeofences() }}><Trash2 className="h-4 w-4" /></Button>
                 </div>
               </div>
             ))}
@@ -892,13 +900,13 @@ function AcademicYearSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleSave = async () => {
-    if (!form.name || !form.startDate || !form.endDate) { toast.error('Lengkapi semua field'); return }
+    if (!form.name || !form.startDate || !form.endDate) { toast.error('Please fill in all fields'); return }
     try {
       await apiFetch('/api/academic-years', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       })
-      toast.success('Tahun ajaran ditambahkan')
+      toast.success('Academic year added')
       setShowForm(false)
       setForm({ name: '', startDate: '', endDate: '' })
       fetchYears()
@@ -911,7 +919,7 @@ function AcademicYearSettings({ themeColor }: { themeColor: string }) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, isActive: true })
       })
-      toast.success('Tahun ajaran diaktifkan')
+      toast.success('Academic year activated')
       fetchYears()
     } catch (err: any) { toast.error(err.message) }
   }
@@ -922,21 +930,20 @@ function AcademicYearSettings({ themeColor }: { themeColor: string }) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Tahun Ajaran</CardTitle>
           <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={() => setShowForm(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Tambah
-          </Button>
+            <Plus className="h-4 w-4 mr-1" /> Add</Button>
         </div>
       </CardHeader>
       <CardContent>
         {showForm && (
-          <div className="space-y-3 mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="space-y-3 mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
             <div><Label className="text-xs">Nama</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="2024/2025 Genap" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Tanggal Mulai</Label><Input type="date" value={form.startDate} onChange={e => setForm(p => ({ ...p, startDate: e.target.value }))} /></div>
               <div><Label className="text-xs">Tanggal Selesai</Label><Input type="date" value={form.endDate} onChange={e => setForm(p => ({ ...p, endDate: e.target.value }))} /></div>
             </div>
             <div className="flex gap-2">
-              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Simpan</Button>
-              <Button variant="outline" onClick={() => setShowForm(false)}>Batal</Button>
+              <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave}><Save className="h-4 w-4 mr-1" /> Save</Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}> Cancel</Button>
             </div>
           </div>
         )}
@@ -953,9 +960,7 @@ function AcademicYearSettings({ themeColor }: { themeColor: string }) {
                   {y.isActive ? (
                     <Badge className="bg-green-100 text-green-800">Aktif</Badge>
                   ) : (
-                    <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => handleSetActive(y.id)}>
-                      Aktifkan
-                    </Button>
+                    <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => handleSetActive(y.id)}>Activate</Button>
                   )}
                 </div>
               </div>
@@ -1028,13 +1033,13 @@ function WelcomeSettings({ themeColor }: { themeColor: string }) {
           body: JSON.stringify({ key: 'custom_var_' + cv.key, value: cv.value, description: 'Custom variable: ' + cv.key })
         })
       }
-      toast.success('Pengaturan welcome disimpan')
+      toast.success('Welcome settings saved')
     } catch (err: any) { toast.error(err.message) }
     finally { setSaving(false) }
   }
 
   const addCustomVar = () => {
-    if (!newVarKey || !newVarValue) { toast.error('Isi key dan value'); return }
+    if (!newVarKey || !newVarValue) { toast.error('Enter key and value'); return }
     setCustomVars([...customVars, { key: newVarKey, value: newVarValue }])
     setNewVarKey(''); setNewVarValue('')
   }
@@ -1044,7 +1049,7 @@ function WelcomeSettings({ themeColor }: { themeColor: string }) {
   }
 
   const handleTestVoice = () => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) { toast.error('Browser tidak mendukung Text-to-Speech'); return }
+    if (typeof window === 'undefined' || !window.speechSynthesis) { toast.error('Browser does not support Text-to-Speech'); return }
     const hour = new Date().getHours()
     const greeting = hour < 11 ? 'Selamat Pagi' : hour < 15 ? 'Selamat Siang' : hour < 18 ? 'Selamat Sore' : 'Selamat Malam'
     let text = testText || configs.welcome_text
@@ -1174,7 +1179,7 @@ function WelcomeSettings({ themeColor }: { themeColor: string }) {
               </div>
             </div>
             <Button className="w-full text-white" style={{ backgroundColor: themeColor }} onClick={handleSave} disabled={saving}>
-              {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Simpan Pengaturan
+              {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Save Settings
             </Button>
           </div>
         )}
@@ -1183,32 +1188,375 @@ function WelcomeSettings({ themeColor }: { themeColor: string }) {
   )
 }
 
-export function SettingsPage({ themeColor }: { themeColor: string }) {
+function DismissalSettings({ themeColor }: { themeColor: string }) {
+  const [jhsTime, setJhsTime] = useState(DEFAULT_DISMISSAL_TIMES.jhs)
+  const [shsTime, setShsTime] = useState(DEFAULT_DISMISSAL_TIMES.shs)
+  const [events, setEvents] = useState<DismissalEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ date: '', level: 'BOTH' as DismissalEvent['level'], time: '', reason: '' })
+
+  useEffect(() => { fetchConfig() }, [])
+
+  const fetchConfig = async () => {
+    setLoading(true)
+    try {
+      const data = await apiFetch<{ configs: { key: string; value: string }[] }>('/api/school-config')
+      const map: Record<string, string> = {}
+      data.configs.forEach(c => { map[c.key] = c.value })
+      setJhsTime(map.dismissal_jhs_time || DEFAULT_DISMISSAL_TIMES.jhs)
+      setShsTime(map.dismissal_shs_time || DEFAULT_DISMISSAL_TIMES.shs)
+      try { setEvents(JSON.parse(map.dismissal_events || '[]')) } catch { setEvents([]) }
+    } catch (err: any) { toast.error(err.message) }
+    finally { setLoading(false) }
+  }
+
+  const addEvent = () => {
+    if (!form.date || !form.time || !form.reason) { toast.error('Date, time, and description are required'); return }
+    setEvents([...events, { id: Math.random().toString(36).slice(2), ...form }])
+    setForm({ date: '', level: 'BOTH', time: '', reason: '' })
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const payload: { key: string; value: string; description: string }[] = [
+        { key: 'dismissal_jhs_time', value: jhsTime, description: 'Jam kepulangan JHS/SMP' },
+        { key: 'dismissal_shs_time', value: shsTime, description: 'Jam kepulangan SHS/SMA' },
+        { key: 'dismissal_events', value: JSON.stringify(events), description: 'Event kepulangan lebih awal' },
+      ]
+      for (const p of payload) {
+        await apiFetch('/api/school-config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p)
+        })
+      }
+      toast.success('Dismissal schedule saved')
+    } catch (err: any) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  if (loading) return <Skeleton className="h-48" />
+
+  return (
+    <Card>
+      <CardHeader className="pb-2"><CardTitle className="text-base">Jadwal Kepulangan</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="p-3 border rounded-lg">
+            <Label className="text-xs font-semibold">Kepulangan JHS (SMP)</Label>
+            <p className="text-xs text-muted-foreground mb-2">Waktu pulang reguler jenjang SMP (default 14:50)</p>
+            <Input type="time" value={jhsTime} onChange={e => setJhsTime(e.target.value)} />
+          </div>
+          <div className="p-3 border rounded-lg">
+            <Label className="text-xs font-semibold">Kepulangan SHS (SMA)</Label>
+            <p className="text-xs text-muted-foreground mb-2">Waktu pulang reguler jenjang SMA (default 15:30)</p>
+            <Input type="time" value={shsTime} onChange={e => setShsTime(e.target.value)} />
+          </div>
+        </div>
+
+        <Separator />
+
+        <div>
+          <Label className="font-medium">Kepulangan Lebih Awal (Event)</Label>
+          <p className="text-xs text-muted-foreground mb-2">Pada event tertentu (rapat guru, kegiatan sekolah, hari khusus), kepulangan bisa lebih awal dari jadwal reguler.</p>
+          {events.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {events.map(ev => (
+                <div key={ev.id} className="flex items-center justify-between p-2 border rounded">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{ev.reason}</p>
+                    <p className="text-xs text-muted-foreground">{ev.date} • {ev.time} WIB • <Badge variant="outline" className="text-[10px]">{ev.level === 'BOTH' ? 'JHS & SHS' : ev.level}</Badge></p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => setEvents(events.filter(x => x.id !== ev.id))}><Trash2 className="h-3 w-3" /></Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Tanggal</Label><Input type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} /></div>
+              <div><Label className="text-xs">Jam Pulang</Label><Input type="time" value={form.time} onChange={e => setForm(p => ({ ...p, time: e.target.value }))} /></div>
+              <div><Label className="text-xs">Jenjang</Label>
+                <Select value={form.level} onValueChange={v => setForm(p => ({ ...p, level: v as DismissalEvent['level'] }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BOTH">JHS & SHS</SelectItem>
+                    <SelectItem value="JHS">JHS (SMP)</SelectItem>
+                    <SelectItem value="SHS">SHS (SMA)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">Keterangan Event</Label><Input value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} placeholder="Contoh: Rapat Guru" /></div>
+            </div>
+            <Button variant="outline" size="sm" onClick={addEvent}><Plus className="h-4 w-4 mr-1" /> Add Event</Button>
+          </div>
+        </div>
+
+        <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave} disabled={saving}>
+          {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Save
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function CalendarSettings({ themeColor }: { themeColor: string }) {
+  const WORK_DAY_OPTIONS = [
+    { key: 'MON', label: 'Senin' },
+    { key: 'TUE', label: 'Selasa' },
+    { key: 'WED', label: 'Rabu' },
+    { key: 'THU', label: 'Kamis' },
+    { key: 'FRI', label: 'Jumat' },
+    { key: 'SAT', label: 'Sabtu' },
+    { key: 'SUN', label: 'Minggu' },
+  ]
+  const [workDays, setWorkDays] = useState<string[]>(DEFAULT_WORK_DAYS)
+  const [holidays, setHolidays] = useState<NationalHoliday[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ date: '', name: '' })
+
+  useEffect(() => { fetchConfig() }, [])
+
+  const fetchConfig = async () => {
+    setLoading(true)
+    try {
+      const data = await apiFetch<{ configs: { key: string; value: string }[] }>('/api/school-config')
+      const map: Record<string, string> = {}
+      data.configs.forEach(c => { map[c.key] = c.value })
+      try {
+        const parsed = JSON.parse(map.school_work_days || '')
+        if (Array.isArray(parsed) && parsed.length > 0) setWorkDays(parsed)
+      } catch { /* keep default */ }
+      try { setHolidays(JSON.parse(map.national_holidays || '[]')) } catch { setHolidays([]) }
+    } catch (err: any) { toast.error(err.message) }
+    finally { setLoading(false) }
+  }
+
+  const toggleDay = (key: string) => {
+    setWorkDays(prev => prev.includes(key) ? prev.filter(d => d !== key) : [...prev, key])
+  }
+
+  const addHoliday = () => {
+    if (!form.date || !form.name) { toast.error('Tanggal dan nama libur wajib diisi'); return }
+    setHolidays([...holidays, { id: Math.random().toString(36).slice(2), ...form }])
+    setForm({ date: '', name: '' })
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const payload: { key: string; value: string; description: string }[] = [
+        { key: 'school_work_days', value: JSON.stringify(workDays), description: 'Hari kerja sekolah (JSON array hari)' },
+        { key: 'national_holidays', value: JSON.stringify(holidays), description: 'Libur nasional (JSON array)' },
+      ]
+      for (const p of payload) {
+        await apiFetch('/api/school-config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p)
+        })
+      }
+      toast.success('Kalender sekolah disimpan')
+    } catch (err: any) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  if (loading) return <Skeleton className="h-48" />
+
+  return (
+    <Card>
+      <CardHeader className="pb-2"><CardTitle className="text-base">Kalender Sekolah</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Label className="font-medium">Hari Kerja Sekolah</Label>
+          <p className="text-xs text-muted-foreground mb-2">Default: 5 hari kerja, Senin s.d. Jumat. Matikan hari yang menjadi libur rutin.</p>
+          <div className="flex flex-wrap gap-2">
+            {WORK_DAY_OPTIONS.map(d => {
+              const active = workDays.includes(d.key)
+              return (
+                <button key={d.key} type="button"
+                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${active ? 'text-white border-transparent' : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}
+                  style={active ? { backgroundColor: themeColor } : {}}
+                  onClick={() => toggleDay(d.key)}>
+                  {d.label}
+                </button>
+              )
+            })}
+          </div>
+          {workDays.length === 0 && <p className="text-xs text-red-500 mt-1">Minimal satu hari kerja harus dipilih.</p>}
+        </div>
+
+        <Separator />
+
+        <div>
+          <Label className="font-medium">Libur Nasional</Label>
+          <p className="text-xs text-muted-foreground mb-2">Tanggal libur nasional di mana sekolah tidak beroperasi.</p>
+          {holidays.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {holidays.map(h => (
+                <div key={h.id} className="flex items-center justify-between p-2 border rounded">
+                  <div>
+                    <p className="text-sm font-medium">{h.name}</p>
+                    <p className="text-xs text-muted-foreground">{h.date}</p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={() => setHolidays(holidays.filter(x => x.id !== h.id))}><Trash2 className="h-3 w-3" /></Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div><Label className="text-xs">Tanggal</Label><Input type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} /></div>
+              <div><Label className="text-xs">Nama Libur</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Contoh: Hari Kemerdekaan RI" /></div>
+            </div>
+            <Button variant="outline" size="sm" onClick={addHoliday}><Plus className="h-4 w-4 mr-1" /> Add Holiday</Button>
+          </div>
+        </div>
+
+        <Button className="text-white" style={{ backgroundColor: themeColor }} onClick={handleSave} disabled={saving}>
+          {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Save
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+interface SubscriptionInfo {
+  schoolId: string
+  schoolName: string
+  schoolCode: string
+  plan: string
+  status: string
+  periodStart: string | null
+  periodEnd: string | null
+  price: number | null
+  notes: string | null
+}
+
+const SUB_STATUS_LABEL: Record<string, string> = {
+  ACTIVE: 'Aktif',
+  TRIAL: 'Masa Percobaan',
+  INACTIVE: 'Nonaktif',
+  EXPIRED: 'Kedaluwarsa',
+}
+
+function subDaysUntil(d: string | Date): number {
+  return Math.max(0, Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000))
+}
+
+function LanggananSettings({ themeColor }: { themeColor: string }) {
+  const { user } = useAuthStore()
+  const schoolId = user?.school?.id || ''
+  const [sub, setSub] = useState<SubscriptionInfo | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    apiFetch<{ subscription: SubscriptionInfo | null }>('/api/account')
+      .then(d => { if (alive) setSub(d.subscription ?? null) })
+      .catch((err: any) => { if (alive) toast.error(err.message) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [])
+
+  const status = sub?.status || ''
+  const ended = status === 'INACTIVE' || status === 'EXPIRED'
+  const daysLeft = sub?.periodEnd ? subDaysUntil(sub.periodEnd) : null
+  const badgeClass = ended
+    ? 'bg-red-100 text-red-800'
+    : daysLeft !== null && daysLeft < 30
+      ? 'bg-amber-100 text-amber-800'
+      : 'bg-green-100 text-green-800'
+
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">Pengaturan</h2>
-      <Tabs defaultValue="school">
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-base">Status Langganan Sekolah</CardTitle></CardHeader>
+        <CardContent>
+          {loading ? <Skeleton className="h-24" /> : !sub ? (
+            <p className="text-sm text-muted-foreground">Data langganan tidak tersedia untuk sekolah ini.</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge className={badgeClass}>{SUB_STATUS_LABEL[status] || status}</Badge>
+                <span className="text-sm font-medium">{sub.schoolName} ({sub.schoolCode})</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                <p className="text-muted-foreground">Paket: <span className="font-medium text-foreground">{sub.plan || '-'}</span></p>
+                <p className="text-muted-foreground">Mulai: <span className="font-medium text-foreground">{sub.periodStart ? new Date(sub.periodStart).toLocaleDateString('id-ID') : '-'}</span></p>
+                <p className="text-muted-foreground">Berakhir: <span className="font-medium text-foreground">{sub.periodEnd ? new Date(sub.periodEnd).toLocaleDateString('id-ID') : '-'}</span></p>
+                {!ended && daysLeft !== null && (
+                  <p className={`font-medium ${daysLeft < 30 ? 'text-amber-600' : 'text-green-600'}`}>Sisa {daysLeft} hari</p>
+                )}
+              </div>
+              {ended && (
+                <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-300 rounded-lg px-3 py-2">
+                  Langganan {SUB_STATUS_LABEL[status] || status.toLowerCase()} — hubungi administrator untuk memperpanjang agar semua layanan tetap aktif.
+                </p>
+              )}
+              {sub.notes && <p className="text-xs text-muted-foreground">Catatan: {sub.notes}</p>}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-base">Riwayat Langganan</CardTitle></CardHeader>
+        <CardContent>
+          {schoolId ? <SubscriptionHistoryList schoolId={schoolId} /> : <Skeleton className="h-24" />}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+export function SettingsPage({ themeColor }: { themeColor: string }) {
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'ADMIN'
+  const isSchoolLeader = isAdmin || user?.role === 'KEPALA_SEKOLAH'
+  const defaultTab = isAdmin ? 'school' : 'account'
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Settings</h2>
+      <Tabs defaultValue={defaultTab}>
         <div className="overflow-x-auto scrollbar-hide">
         <TabsList className="flex-nowrap min-w-max">
-          <TabsTrigger value="school" className="flex-1 min-w-[80px]">Sekolah</TabsTrigger>
-          <TabsTrigger value="students" className="flex-1 min-w-[80px]">Siswa</TabsTrigger>
-          <TabsTrigger value="users" className="flex-1 min-w-[80px]">Pengguna</TabsTrigger>
-          <TabsTrigger value="classes" className="flex-1 min-w-[80px]">Kelas</TabsTrigger>
-          <TabsTrigger value="categories" className="flex-1 min-w-[80px]">Kategori</TabsTrigger>
-          <TabsTrigger value="geofence" className="flex-1 min-w-[80px]">Geofence</TabsTrigger>
-          <TabsTrigger value="academic" className="flex-1 min-w-[80px]">Tahun Ajaran</TabsTrigger>
-          <TabsTrigger value="welcome" className="flex-1 min-w-[80px]">Welcome</TabsTrigger>
+          {/* Account is available to EVERY role (RBAC); the data tabs below are admin-only. */}
+          <TabsTrigger value="account" className="flex-1 min-w-[80px]">Account</TabsTrigger>
+          {isAdmin && <>
+            <TabsTrigger value="school" className="flex-1 min-w-[80px]">School</TabsTrigger>
+            <TabsTrigger value="profile" className="flex-1 min-w-[80px]">Profile</TabsTrigger>
+            <TabsTrigger value="students" className="flex-1 min-w-[80px]">Students</TabsTrigger>
+            <TabsTrigger value="users" className="flex-1 min-w-[80px]">Users</TabsTrigger>
+            <TabsTrigger value="classes" className="flex-1 min-w-[80px]">Classes</TabsTrigger>
+            <TabsTrigger value="categories" className="flex-1 min-w-[80px]">Categories</TabsTrigger>
+            <TabsTrigger value="geofence" className="flex-1 min-w-[80px]">Geofence</TabsTrigger>
+            <TabsTrigger value="academic" className="flex-1 min-w-[80px]">Academic Years</TabsTrigger>
+            <TabsTrigger value="welcome" className="flex-1 min-w-[80px]">Welcome</TabsTrigger>
+            <TabsTrigger value="dismissal" className="flex-1 min-w-[80px]">Dismissal</TabsTrigger>
+            <TabsTrigger value="calendar" className="flex-1 min-w-[80px]">Calendar</TabsTrigger>
+          </>}
+          {isSchoolLeader && <TabsTrigger value="langganan" className="flex-1 min-w-[80px]">Subscription</TabsTrigger>}
         </TabsList>
         </div>
 
-        <TabsContent value="school" className="mt-4"><SchoolSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="students" className="mt-4"><SiswaSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="users" className="mt-4"><UsersSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="classes" className="mt-4"><KelasSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="categories" className="mt-4"><CategoriesSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="geofence" className="mt-4"><GeofenceSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="academic" className="mt-4"><AcademicYearSettings themeColor={themeColor} /></TabsContent>
-        <TabsContent value="welcome" className="mt-4"><WelcomeSettings themeColor={themeColor} /></TabsContent>
+        <TabsContent value="account" className="mt-4"><AccountSettings /></TabsContent>
+        {isAdmin && <>
+          <TabsContent value="school" className="mt-4"><SchoolSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="profile" className="mt-4"><SchoolProfileSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="students" className="mt-4"><SiswaSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="users" className="mt-4"><UsersSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="classes" className="mt-4"><KelasSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="categories" className="mt-4"><CategoriesSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="geofence" className="mt-4"><GeofenceSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="academic" className="mt-4"><AcademicYearSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="welcome" className="mt-4"><WelcomeSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="dismissal" className="mt-4"><DismissalSettings themeColor={themeColor} /></TabsContent>
+          <TabsContent value="calendar" className="mt-4"><CalendarSettings themeColor={themeColor} /></TabsContent>
+        </>}
+        {isSchoolLeader && <TabsContent value="langganan" className="mt-4"><LanggananSettings themeColor={themeColor} /></TabsContent>}
       </Tabs>
     </div>
   )

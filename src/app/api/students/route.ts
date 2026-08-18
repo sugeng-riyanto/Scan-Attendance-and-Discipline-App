@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole, hashPassword } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 function generateQRString(nisn: string): string {
   const salt = 'SCHOOL-ATTENDANCE-2024';
@@ -22,7 +23,9 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
 
-    const where: any = {};
+    // Per-school isolation: non-super users only see their own school's students.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.schoolWhere };
     if (classId && classId !== 'all') where.classId = classId;
     if (academicYearId) where.academicYearId = academicYearId;
     if (search) {
@@ -77,7 +80,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'NISN, Nama, Kelas, dan Tahun Ajaran wajib diisi' }, { status: 400 });
     }
 
-    // Auto-create User account for the student
+    // Per-school isolation: the new student is bound to the actor's school.
+    const scope = await getSchoolScope(auth);
+
+    // Auto-create User account for the student (bound to the same school)
     const username = `student_${nisn}`;
     const defaultPassword = nisn; // Use NISN as default password
     const hashedPw = hashPassword(defaultPassword);
@@ -88,6 +94,7 @@ export async function POST(request: NextRequest) {
         password: hashedPw,
         name,
         role: 'SISWA',
+        schoolId: scope.schoolId,
       },
     });
 
@@ -98,6 +105,7 @@ export async function POST(request: NextRequest) {
       data: {
         nisn,
         name,
+        schoolId: scope.schoolId,
         classId,
         academicYearId,
         userId: user.id,
@@ -144,6 +152,13 @@ export async function PUT(request: NextRequest) {
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
+    // Per-school isolation: only allow updating a student in the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     // Filter out fields that shouldn't be updated directly
     const allowedFields = ['nisn', 'name', 'classId', 'academicYearId', 'gender', 'qrCode', 'photoBase64', 'address', 'email', 'phone', 'status', 'photoUrl', 'totalViolationPoints', 'totalGoodPoints', 'faceCaptureEnabled', 'idCardVisibleToStudent', 'idCardVisibleToParent'];
     const updateData: any = {};
@@ -188,6 +203,13 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get('id');
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
+
+    // Per-school isolation: only allow deleting a student in the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
 
     // Get the student to find associated userId
     const student = await db.student.findUnique({

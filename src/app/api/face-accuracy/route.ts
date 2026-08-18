@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 const FACE_ROLES = ['ADMIN', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
 
@@ -59,8 +60,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Per-school isolation: only this school's students.
+    const scope = await getSchoolScope(auth);
+    const scoped = await db.student.findFirst({
+      where: { ...(studentId ? { id: studentId } : { nisn }), ...scope.schoolWhere } as any,
+      select: { id: true },
+    });
+    if (!scoped) {
+      return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     // Find student
-    let targetStudentId = studentId;
+    let targetStudentId = scoped.id;
     if (!targetStudentId && nisn) {
       const student = await db.student.findUnique({ where: { nisn } });
       if (!student) {
@@ -223,8 +234,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Per-school isolation: only this school's students.
+    const scope = await getSchoolScope(auth);
+    const scoped = await db.student.findFirst({
+      where: { ...(studentId ? { id: studentId } : { nisn }), ...scope.schoolWhere } as any,
+      select: { id: true },
+    });
+    if (!scoped) {
+      return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     // Find student
-    let targetStudentId = studentId;
+    let targetStudentId = scoped.id;
     if (!targetStudentId && nisn) {
       const student = await db.student.findUnique({ where: { nisn } });
       if (!student) {

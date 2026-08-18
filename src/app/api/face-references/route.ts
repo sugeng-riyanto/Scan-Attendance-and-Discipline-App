@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 const FACE_ROLES = ['ADMIN', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
 const MAX_CAPTURES_PER_STUDENT = 5;
@@ -32,7 +33,9 @@ export async function GET(request: NextRequest) {
     const studentId = searchParams.get('studentId');
     const nisn = searchParams.get('nisn');
 
-    const where: Record<string, unknown> = { isActive: true };
+    // Per-school isolation: only this school's face references.
+    const scope = await getSchoolScope(auth);
+    const where: Record<string, unknown> = { isActive: true, ...scope.studentWhere };
 
     if (studentId) {
       where.studentId = studentId;
@@ -135,6 +138,13 @@ export async function POST(request: NextRequest) {
         { error: 'Metode capture tidak valid. Gunakan WEBCAM atau MANUAL' },
         { status: 400 }
       );
+    }
+
+    // Per-school isolation: the student must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id: studentId, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
     }
 
     // Validate face descriptor if provided

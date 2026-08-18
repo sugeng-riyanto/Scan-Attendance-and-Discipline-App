@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -24,6 +25,8 @@ model Class {
   id                String   @id @default(cuid())
   name              String
   level             String
+  schoolId          String?
+  school            School?  @relation(fields: [schoolId], references: [id])
   academicYearId    String
   academicYear      AcademicYear @relation(fields: [academicYearId], references: [id])
   homeroomTeacherId String? @unique
@@ -31,6 +34,62 @@ model Class {
   students          Student[]
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@index([schoolId])
+}
+
+model School {
+  id         String   @id @default(cuid())
+  code       String   @unique // short code e.g. SHB-001
+  name       String
+  address    String?
+  // Per-school branding for the landing/login page and the app header.
+  logo       String?  // URL/data-URL of the school logo
+  themeColor String?  // hex accent color, e.g. "#10b981"
+  headerImage String? // banner photo shown on the school's landing page + directory card
+  domain     String?  @unique // dedicated subdomain, e.g. "shb-001.app.test"
+
+  // Public profile shown on the school's landing page (/s/:code) and editable
+  // by the school's Admin/Kepala Sekolah (Settings -> Profil).
+  description String? // ringkasan profil singkat
+  vision      String? // visi sekolah
+  mission     String? // misi sekolah (multi-line)
+  phone       String? // telepon kontak
+  email       String? // email kontak
+  hasJhs      Boolean  @default(true) // jenjang JHS (SMP)
+  hasShs      Boolean  @default(true) // jenjang SHS (SMA)
+  jhsStart    String? // jam masuk JHS, e.g. "07:00"
+  jhsEnd      String? // jam pulang JHS, e.g. "14:50"
+  shsStart    String? // jam masuk SHS, e.g. "07:00"
+  shsEnd      String? // jam pulang SHS, e.g. "15:30"
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  users        User[]
+  subscriptions Subscription[]
+  classes      Class[]
+  students     Student[]
+
+  @@index([isActive])
+}
+
+// Yearly subscription (langganan) per school — managed by SUPER_ADMIN.
+// status: ACTIVE | INACTIVE | TRIAL | EXPIRED
+model Subscription {
+  id          String   @id @default(cuid())
+  schoolId    String   @unique
+  school      School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  plan        String   @default("YEARLY")
+  status      String   @default("TRIAL")
+  periodStart DateTime?
+  periodEnd   DateTime?
+  price       Float?   // nominal in IDR per year
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
 }
 
 model User {
@@ -39,10 +98,21 @@ model User {
   password  String
   name      String
   role      String
-  avatar    String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  schoolId  String?
+  school    School?  @relation(fields: [schoolId], references: [id])
+  avatar          String?
+  isActive        Boolean  @default(true)
+  termsAcceptedAt DateTime?
+  email           String?
+  // Account security & reminders (per-role Pengaturan Akun)
+  pinHash        String?  // hashed PIN for quick unlock (login cepat)
+  pinEnabled     Boolean  @default(false)
+  authEnabled    Boolean  @default(false) // PIN-based authentication enabled
+  reminderEnabled Boolean @default(false)
+  reminderType   String?  // CHECK_IN | CHECK_OUT
+  reminderLevel  String?  // JHS | SHS (which dismissal schedule the reminder follows)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   student        Student?
   parent         Parent?
@@ -56,12 +126,15 @@ model User {
   scanActivated        ScanSession[]        @relation("ScanActivator")
   scanDeactivated    ScanSession[]  @relation("ScanDeactivator")
   faceCaptures       FaceReference[]
+  auditLogs          AuditLog[]
 }
 
 model Student {
   id                   String   @id @default(cuid())
   nisn                 String   @unique
   name                 String
+  schoolId             String?
+  school               School?  @relation(fields: [schoolId], references: [id])
   classId              String
   class                Class    @relation(fields: [classId], references: [id])
   academicYearId       String
@@ -95,6 +168,7 @@ model Student {
   @@index([academicYearId])
   @@index([status])
   @@index([name])
+  @@index([schoolId])
 }
 
 model Parent {
@@ -368,6 +442,32 @@ model FaceReference {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// Immutable trail of sensitive events (login/logout, exports, imports,
+// config changes, account changes, breach reports) so Admin & Kepala Sekolah
+// can monitor users and detect unusual activity per UU PDP / T&C declarations.
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  username  String?
+  role      String?
+  action    String   // e.g. LOGIN_SUCCESS, EXPORT, IMPORT, RESEED, PASSWORD_CHANGE, BREACH_REPORTED
+  category  String   // AUTH, DATA, EXPORT, IMPORT, SETTINGS, ACCOUNT, BREACH, SYSTEM
+  level     String?  // JHS | SHS | null (jenjang the event relates to)
+  severity  String   @default("INFO") // INFO | WARNING | CRITICAL
+  schoolId  String?  // school the event relates to (e.g. subscription renewals)
+  details   String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([category])
+  @@index([severity])
+  @@index([level])
+  @@index([schoolId])
+  @@index([createdAt])
+  @@index([userId])
 }
 
 model OfflineQueue {

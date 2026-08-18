@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { logAudit } from '@/lib/audit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
       update: { value, description },
       create: { key, value, description },
     });
+    await logAudit({ action: 'CONFIG_CHANGE', category: 'SETTINGS', severity: 'INFO', userId: auth.userId, username: auth.username, role: auth.role, details: `Konfigurasi ${key} diubah` });
     return NextResponse.json({ config });
   } catch (error) {
     return NextResponse.json({ error: 'Gagal menyimpan konfigurasi' }, { status: 500 });

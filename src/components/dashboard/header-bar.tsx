@@ -14,9 +14,13 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Bell, LogOut, Wifi, WifiOff, RefreshCw, GraduationCap, Upload, Save, User } from 'lucide-react'
 import { toast } from 'sonner'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { SchoolSwitcher } from './school-switcher'
+import { usePreviewStore } from '@/lib/stores/preview-store'
 
 export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolConfigType; themeColor: string }) {
   const { user, logout } = useAuthStore()
+  const { preview } = usePreviewStore()
   const { notifications, markNotificationRead, unreadCount } = useAppStore()
   const [showNotif, setShowNotif] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
@@ -109,7 +113,7 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
   }, [syncOfflineData])
 
   return (
-    <header className="sticky top-0 z-40 bg-white border-b shadow-sm">
+    <header className="sticky top-0 z-40 bg-white border-b shadow-sm dark:bg-gray-900 dark:border-gray-800">
       <div className="flex items-center justify-between h-14 px-4">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-full text-white" style={{ backgroundColor: themeColor }}>
@@ -120,10 +124,12 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
             )}
           </div>
           <div className="hidden sm:block">
-            <h1 className="text-sm font-bold" style={{ color: themeColor }}>{schoolConfig.school_name}</h1>
+            <h1 className="text-sm font-bold" style={{ color: themeColor }}>{preview ? preview.name : user?.school?.name || schoolConfig.school_name}</h1>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* SUPER_ADMIN school preview switcher */}
+          <SchoolSwitcher />
           {/* Online/Offline Indicator */}
           <div className="flex items-center gap-1">
             {isOnline ? (
@@ -138,6 +144,8 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
               </Button>
             )}
           </div>
+          {/* Light/Dark mode toggle */}
+          <ThemeToggle />
           {/* Notifications */}
           <div className="relative">
             <Button variant="ghost" size="icon" className="relative min-h-[44px] min-w-[44px]" onClick={() => setShowNotif(!showNotif)}>
@@ -145,7 +153,7 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
               {unread > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center">{unread}</span>}
             </Button>
             {showNotif && (
-              <div className="absolute right-0 top-12 w-72 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+              <div className="absolute right-0 top-12 w-72 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto dark:bg-gray-800 dark:border-gray-700">
                 <div className="p-3 border-b flex justify-between items-center">
                   <span className="font-semibold text-sm">Notifikasi</span>
                   <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowNotif(false)}>Tutup</Button>
@@ -154,7 +162,7 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
                   <div className="p-4 text-center text-sm text-muted-foreground">Tidak ada notifikasi</div>
                 ) : (
                   notifications.slice(0, 20).map(n => (
-                    <div key={n.id} className={`p-3 border-b cursor-pointer hover:bg-gray-50 ${!n.isRead ? 'bg-gray-50' : ''}`}
+                    <div key={n.id} className={`p-3 border-b cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${!n.isRead ? 'bg-gray-50 dark:bg-gray-800' : ''}`}
                       onClick={() => markNotificationRead(n.id)}>
                       <p className="text-sm">{n.message}</p>
                       <p className="text-xs text-muted-foreground mt-1">{new Date(n.timestamp).toLocaleString('id-ID')}</p>
@@ -177,7 +185,11 @@ export function HeaderBar({ schoolConfig, themeColor }: { schoolConfig: SchoolCo
               <p className="text-xs text-muted-foreground">{roleLabels[user?.role || ''] || user?.role}</p>
             </div>
           </button>
-          <Button variant="ghost" size="icon" className="min-h-[44px] min-w-[44px]" onClick={() => { logout(); toast.success('Berhasil logout') }}>
+          <Button variant="ghost" size="icon" className="min-h-[44px] min-w-[44px]" onClick={() => {
+            usePreviewStore.getState().clearPreview()
+            logout()
+            toast.success('Berhasil logout')
+          }}>
             <LogOut className="h-5 w-5" />
           </Button>
         </div>

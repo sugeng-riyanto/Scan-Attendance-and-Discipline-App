@@ -66,7 +66,7 @@ function IdCardFace({ student, qrDataUrl, schoolConfig, themeColor, showPhotoUpl
       </div>
 
       {/* Body */}
-      <div className="bg-white p-2 sm:p-4">
+      <div className="bg-white dark:bg-gray-900 p-2 sm:p-4">
         <div className="flex flex-row gap-2 sm:gap-3 items-start">
           {/* Photo */}
           <div className="relative w-14 h-[68px] sm:w-20 sm:h-24 rounded-lg border-2 overflow-hidden shadow-sm shrink-0" style={{ borderColor: themeColor + '30' }}>
@@ -101,7 +101,7 @@ function IdCardFace({ student, qrDataUrl, schoolConfig, themeColor, showPhotoUpl
           {/* QR */}
           <div className="flex flex-col items-center shrink-0">
             <div className="w-[52px] h-[52px] sm:w-[72px] sm:h-[72px] rounded-lg border p-0.5 shadow-sm" style={{ borderColor: themeColor + '30' }}>
-              {qrDataUrl ? <img src={qrDataUrl} alt="QR" className="w-full h-full" /> : <div className="w-full h-full bg-gray-50 rounded animate-pulse" />}
+              {qrDataUrl ? <img src={qrDataUrl} alt="QR" className="w-full h-full" /> : <div className="w-full h-full bg-gray-50 dark:bg-gray-800 rounded animate-pulse" />}
             </div>
             <p className="text-[8px] sm:text-[9px] text-gray-400 mt-0.5 whitespace-nowrap text-center">Scan presensi</p>
           </div>
@@ -410,7 +410,7 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
   if (sLoad) return <PageSkeleton />
   if (!me) return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Kartu Identitas Siswa</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Kartu Identitas Siswa</h2>
       <Card><CardContent className="p-8 text-center">
         <User className="h-12 w-12 text-gray-300 mx-auto mb-3" />
         <p className="text-muted-foreground">Data siswa tidak ditemukan</p>
@@ -433,7 +433,7 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Kartu Identitas Siswa</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Kartu Identitas Siswa</h2>
       <div className="flex justify-center">
         <div id="student-id-card" className="inline-block cursor-pointer" onClick={() => { setFullscreenId('student-id-card'); setZoomLevel(1) }}>
           <IdCardFace student={me} qrDataUrl={qrDataUrl} schoolConfig={schoolConfig} themeColor={themeColor} />
@@ -472,7 +472,7 @@ function StudentSingleCardView({ initialStudent }: { initialStudent?: Student } 
             <div className="w-full h-full overflow-auto touch-auto" style={{ touchAction: 'pinch-zoom' }}>
               <div className="min-h-full flex items-center justify-center p-4 sm:p-8"
                 style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}>
-                <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-sm sm:max-w-md"
+                <div className="bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-2xl w-full max-w-sm sm:max-w-md"
                   ref={el => {
                     if (!el || zoomLevel !== 1) return;
                     const parent = el.parentElement?.parentElement?.parentElement;
@@ -668,7 +668,7 @@ function BatchIdCardView() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-xl font-bold text-gray-800">Cetak Kartu ID Siswa</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Cetak Kartu ID Siswa</h2>
         {selectedStudents.length > 0 && (
           <Badge variant="secondary" className="text-sm px-3 py-1">{selectedStudents.length} siswa dipilih</Badge>
         )}
@@ -681,11 +681,11 @@ function BatchIdCardView() {
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <label className="text-sm font-medium text-gray-700 shrink-0">Kelas:</label>
               {user?.role === 'WALI_KELAS' && myClass ? (
-                <div className="flex-1 sm:w-48 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-md text-gray-700 font-medium">
+                <div className="flex-1 sm:w-48 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-700 dark:text-gray-300 font-medium">
                   {myClass.name} ({students.length} siswa)
                 </div>
               ) : (
-                <select className="flex-1 sm:w-48 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white"
+                <select className="flex-1 sm:w-48 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-800"
                   value={selectedClassId} onChange={e => setSelectedClassId(e.target.value)}>
                   <option value="all">Semua Kelas</option>
                   {classes.map(c => (

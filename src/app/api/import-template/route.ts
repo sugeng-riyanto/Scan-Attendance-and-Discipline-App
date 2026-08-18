@@ -11,24 +11,31 @@ interface TemplateConfig {
 
 const TEMPLATES: Record<string, TemplateConfig> = {
   students: {
-    columns: ['NISN', 'Nama Siswa', 'Kelas', 'Jenis Kelamin', 'Nama Orang Tua', 'Alamat', 'Email', 'No HP'],
+    // Kolom Jenjang (JHS/SHS) menentukan level kelas saat import otomatis:
+    // JHS -> SMP (VII–IX), SHS -> SMA (X–XII). Database menyesuaikan otomatis.
+    // Kolom Kode Sekolah (multi-tenant): kosong = sekolah pengimpor; kode yang
+    // BELUM ada otomatis membuat sekolah baru + langganan TRIAL 30 hari
+    // (khusus SUPER_ADMIN), jadi satu upload menyediakan sekolah baru sepenuhnya.
+    columns: ['NISN', 'Nama Siswa', 'Jenjang', 'Kelas', 'Jenis Kelamin', 'Nama Orang Tua', 'Alamat', 'Email', 'No HP', 'Kode Sekolah', 'Nama Sekolah'],
     exampleRows: [
-      ['0012345678', 'Ahmad Fauzi', '7A', 'Laki-laki', 'Budi Fauzi', 'Jl. Merdeka No. 10', 'ahmad@example.com', '081234567890'],
-      ['0012345679', 'Siti Aminah', '7B', 'Perempuan', 'Hasan Aminah', 'Jl. Pahlawan No. 5', 'siti@example.com', '081234567891'],
+      ['0012345678', 'Ahmad Fauzi', 'JHS', '7A', 'Laki-laki', 'Budi Fauzi', 'Jl. Merdeka No. 10', 'ahmad@example.com', '081234567890', 'SHB-001', ''],
+      ['0012345679', 'Siti Aminah', 'SHS', '10 IPA 1', 'Perempuan', 'Hasan Aminah', 'Jl. Pahlawan No. 5', 'siti@example.com', '081234567891', 'SDN-99', 'SDN Cendekia 99'],
     ],
     filename: 'template_import_siswa.xlsx',
     sheetName: 'Siswa',
-    colWidths: [14, 20, 8, 14, 20, 25, 22, 16, 10],
+    colWidths: [14, 20, 10, 14, 14, 20, 25, 22, 16, 14, 22, 10],
   },
   users: {
-    columns: ['Username', 'Nama', 'Role', 'NIP', 'Nama Kelas'],
+    // Kolom Kode Sekolah (multi-tenant): kosongkan untuk sekolah default,
+    // atau isi kode sekolah (contoh: SHB-001) agar pengguna langsung masuk ke sekolah itu.
+    columns: ['Username', 'Nama', 'Role', 'NIP', 'Nama Kelas', 'Kode Sekolah'],
     exampleRows: [
-      ['guru01', 'Pak Hendra', 'GURU', '198501012010011001', ''],
-      ['wali07a', 'Bu Sri Mulyani', 'WALI_KELAS', '198703152011012002', '7A'],
+      ['guru01', 'Pak Hendra', 'GURU', '198501012010011001', '', 'SHB-001'],
+      ['wali07a', 'Bu Sri Mulyani', 'WALI_KELAS', '198703152011012002', '7A', 'SHB-001'],
     ],
     filename: 'template_import_pengguna.xlsx',
     sheetName: 'Pengguna',
-    colWidths: [16, 22, 16, 22, 14, 10],
+    colWidths: [16, 22, 16, 22, 14, 14, 10],
   },
   'violation-categories': {
     columns: ['Kode', 'Nama', 'Level', 'Poin'],

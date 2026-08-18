@@ -414,15 +414,15 @@ export function FaceCapturePage() {
                 <div className={`h-3 rounded-full transition-all duration-500 ${getProgressColor(accuracyResult.overallAccuracy)}`} style={{ width: `${Math.min(100, accuracyResult.overallAccuracy)}%` }} />
               </div>
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="bg-white/60 rounded p-2">
+                <div className="bg-white/60 dark:bg-gray-800/60 rounded p-2">
                   <p className="text-[10px] text-muted-foreground">Min</p>
                   <p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.minAccuracy)}`}>{accuracyResult.minAccuracy.toFixed(1)}%</p>
                 </div>
-                <div className="bg-white/60 rounded p-2">
+                <div className="bg-white/60 dark:bg-gray-800/60 rounded p-2">
                   <p className="text-[10px] text-muted-foreground">Rata-rata</p>
                   <p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.overallAccuracy)}`}>{accuracyResult.overallAccuracy.toFixed(1)}%</p>
                 </div>
-                <div className="bg-white/60 rounded p-2">
+                <div className="bg-white/60 dark:bg-gray-800/60 rounded p-2">
                   <p className="text-[10px] text-muted-foreground">Max</p>
                   <p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.maxAccuracy)}`}>{accuracyResult.maxAccuracy.toFixed(1)}%</p>
                 </div>
@@ -494,7 +494,7 @@ export function FaceCapturePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">Capture Wajah Siswa</h2>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Capture Wajah Siswa</h2>
           <p className="text-sm text-muted-foreground">Kelola referensi wajah untuk pengenalan otomatis saat presensi</p>
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -543,7 +543,7 @@ export function FaceCapturePage() {
             <Input placeholder="Cari nama/NISN..." value={search} onChange={e => setSearch(e.target.value)} className="mb-3" />
             <ScrollArea className="max-h-[500px]">
               {filtered.map(s => (
-                <div key={s.id} className={`flex items-center gap-2 py-2 px-2 border-b last:border-0 cursor-pointer rounded hover:bg-gray-50 ${selectedStudent?.id === s.id ? 'bg-emerald-50 border-emerald-200' : ''}`}
+                <div key={s.id} className={`flex items-center gap-2 py-2 px-2 border-b last:border-0 cursor-pointer rounded hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedStudent?.id === s.id ? 'bg-emerald-50 border-emerald-200' : ''}`}
                   onClick={() => handleSelectStudent(s)}>
                   <Avatar className="h-8 w-8">
                     {(s.photoBase64 || s.photoUrl) ? <img src={s.photoBase64 || s.photoUrl} alt="" className="h-8 w-8 rounded-full object-cover" /> : <AvatarFallback className="text-xs">{s.name.charAt(0)}</AvatarFallback>}
@@ -591,7 +591,7 @@ export function FaceCapturePage() {
               <Input placeholder="Cari nama/NISN..." value={search} onChange={e => setSearch(e.target.value)} className="mb-3" />
               <ScrollArea className="max-h-[500px]">
                 {filtered.map(s => (
-                  <div key={s.id} className={`flex items-center gap-2 py-2.5 px-2 border-b last:border-0 cursor-pointer rounded hover:bg-gray-50 active:bg-gray-100 ${selectedStudent?.id === s.id ? 'bg-emerald-50 border-emerald-200' : ''}`}
+                  <div key={s.id} className={`flex items-center gap-2 py-2.5 px-2 border-b last:border-0 cursor-pointer rounded hover:bg-gray-50 dark:hover:bg-gray-800 active:bg-gray-100 dark:active:bg-gray-700 ${selectedStudent?.id === s.id ? 'bg-emerald-50 border-emerald-200' : ''}`}
                     onClick={() => handleSelectStudent(s)}>
                     <Avatar className="h-10 w-10">
                       {(s.photoBase64 || s.photoUrl) ? <img src={s.photoBase64 || s.photoUrl} alt="" className="h-10 w-10 rounded-full object-cover" /> : <AvatarFallback>{s.name.charAt(0)}</AvatarFallback>}

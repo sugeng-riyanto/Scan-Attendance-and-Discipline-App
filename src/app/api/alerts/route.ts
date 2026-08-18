@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,8 +12,11 @@ export async function GET(request: NextRequest) {
     }
     const { searchParams } = new URL(request.url);
     const targetRole = searchParams.get('targetRole');
+    const isRead = searchParams.get('isRead');
 
-    const where: any = {};
+    // Per-school isolation: only this school's alerts.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.studentWhere };
     if (targetRole) where.targetRole = targetRole;
     if (isRead !== null && isRead !== undefined && isRead !== '') where.isRead = isRead === 'true';
 
@@ -43,6 +47,11 @@ export async function PUT(request: NextRequest) {
     const { id, isRead } = body;
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
+
+    // Per-school isolation: alert must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    const owned = await db.behaviorAlert.findFirst({ where: { id, ...scope.studentWhere }, select: { id: true } });
+    if (!owned) return NextResponse.json({ error: 'Peringatan tidak ditemukan di sekolah Anda' }, { status: 404 });
 
     const alert = await db.behaviorAlert.update({
       where: { id },

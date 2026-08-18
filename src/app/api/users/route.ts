@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole, hashPassword } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 async function checkAuth(request: NextRequest, allowedRoles: string[]) {
   const auth = getAuthUser(request);
@@ -25,7 +26,15 @@ export async function GET(request: NextRequest) {
     const role = searchParams.get('role');
     const isActive = searchParams.get('isActive');
 
+    // School-scoped: non-super-admins only see users from their own school.
+    const scope = await getSchoolScope(authErr);
     const where: Record<string, unknown> = {};
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      where.schoolId = scope.schoolId;
+    } else if (!scope.isSuperAdmin) {
+      // No school binding → deny (return empty)
+      where.id = '__no_match__';
+    }
     if (role) where.role = role;
     if (isActive !== null && isActive !== undefined && isActive !== '') where.isActive = isActive === 'true';
 
@@ -39,6 +48,7 @@ export async function GET(request: NextRequest) {
         avatar: true,
         isActive: true,
         createdAt: true,
+        schoolId: true,
         student: { select: { id: true, nisn: true, name: true, class: { select: { name: true } } } },
         parent: { select: { id: true, student: { select: { name: true, class: { select: { name: true } } } }, relationship: true } },
         teacher: { select: { id: true, nip: true, subjects: true } },
@@ -66,12 +76,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 });
     }
 
+    // Non-super-admins can only create users in the same school.
+    const scope = await getSchoolScope(authErr);
+    const schoolId = scope.isSuperAdmin ? (body.schoolId || scope.schoolId) : scope.schoolId;
+
+    // Only SUPER_ADMIN can create SUPER_ADMIN accounts.
+    if (role === 'SUPER_ADMIN' && authErr.role !== 'SUPER_ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const user = await db.user.create({
       data: {
         username,
         password: hashPassword(password),
         name,
         role,
+        schoolId: schoolId || undefined,
       },
     });
 
@@ -96,9 +116,37 @@ export async function PUT(request: NextRequest) {
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
-    // Allow ADMIN to update any user, or user to update their own profile
-    if (auth.userId !== id && !requireRole(auth.role, ADMIN_ROLES)) {
+    const isSelf = auth.userId === id;
+    const isAdmin = requireRole(auth.role, ADMIN_ROLES);
+
+    // Only ADMIN can update other users; non-admins can only update themselves.
+    if (!isSelf && !isAdmin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Self-updates: only allow safe profile fields (no role, schoolId, or isActive).
+    if (isSelf && !isAdmin) {
+      const safeFields = ['name', 'avatar', 'password', 'email', 'pin'];
+      for (const key of Object.keys(data)) {
+        if (!safeFields.includes(key)) {
+          return NextResponse.json({ error: `Cannot change field '${key}'` }, { status: 403 });
+        }
+      }
+    }
+
+    // Only SUPER_ADMIN can assign or change SUPER_ADMIN role.
+    if (data.role === 'SUPER_ADMIN' && auth.role !== 'SUPER_ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Only ADMIN can change roles.
+    if (data.role && !isAdmin) {
+      return NextResponse.json({ error: 'Cannot change role' }, { status: 403 });
+    }
+
+    // School-scoping: non-admins cannot change schoolId.
+    if (data.schoolId && !isAdmin) {
+      return NextResponse.json({ error: 'Cannot change school assignment' }, { status: 403 });
     }
 
     if (data.password) {

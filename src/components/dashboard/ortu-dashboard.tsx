@@ -216,7 +216,7 @@ function OrtuPermissionList({ studentId }: { studentId: string }) {
       {/* Attachment Preview Modal */}
       {previewAttach && previewAttach.attachmentData && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewAttach(null)}>
-          <div className="relative bg-white rounded-xl max-w-lg w-full max-h-[80vh] overflow-auto p-4" onClick={e => e.stopPropagation()}>
+          <div className="relative bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full max-h-[80vh] overflow-auto p-4" onClick={e => e.stopPropagation()}>
             <button onClick={() => setPreviewAttach(null)} className="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full w-8 h-8 flex items-center justify-center text-sm">✕</button>
             <p className="font-medium text-sm mb-3">Lampiran: {previewAttach.attachmentName || 'Dokumen'}</p>
             {previewAttach.attachmentType === 'application/pdf' ? (
@@ -267,7 +267,7 @@ export function OrtuDashboard() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Dashboard Orang Tua</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Orang Tua</h2>
 
       {alerts.length > 0 && (
         <Card className="border-orange-200 bg-orange-50">
@@ -423,7 +423,7 @@ export function OrtuDashboard() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="bg-gray-50">
+            <Card className="bg-gray-50 dark:bg-gray-800">
               <CardContent className="p-4 flex items-center gap-3 opacity-60">
                 <div className="p-2 rounded-lg bg-gray-200"><CreditCard className="h-6 w-6 text-gray-400" /></div>
                 <div className="flex-1">

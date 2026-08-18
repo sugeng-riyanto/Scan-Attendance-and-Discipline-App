@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +20,9 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
 
-    const where: any = {};
+    // Per-school isolation: only this school's attendance.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.studentWhere };
 
     if (date) {
       const d = new Date(date);
@@ -87,6 +90,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 });
     }
 
+    // Per-school isolation: the student must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id: studentId, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     const d = new Date(date);
     const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
@@ -137,6 +147,11 @@ export async function PUT(request: NextRequest) {
     const { id, ...data } = body;
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
+
+    // Per-school isolation: attendance record must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    const owned = await db.attendance.findFirst({ where: { id, ...scope.studentWhere }, select: { id: true } });
+    if (!owned) return NextResponse.json({ error: 'Catatan kehadiran tidak ditemukan di sekolah Anda' }, { status: 404 });
 
     if (data.checkInTime) data.checkInTime = new Date(data.checkInTime);
     if (data.checkOutTime) data.checkOutTime = new Date(data.checkOutTime);

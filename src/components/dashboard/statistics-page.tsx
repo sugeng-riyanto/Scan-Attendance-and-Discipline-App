@@ -52,7 +52,7 @@ function IndividualStatistics({ student, attData, violData, goodData }: {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">Statistik {authUser?.role === 'SISWA' ? 'Pribadi' : `Anak (${student.name})`}</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Statistik {authUser?.role === 'SISWA' ? 'Pribadi' : `Anak (${student.name})`}</h2>
 
       <Card>
         <CardContent className="p-4 flex items-center gap-4">
@@ -228,7 +228,7 @@ export function StatisticsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-xl font-bold text-gray-800">Statistik</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Statistik</h2>
         <div className="flex gap-2">
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="h-10 w-full sm:w-32"><SelectValue /></SelectTrigger>

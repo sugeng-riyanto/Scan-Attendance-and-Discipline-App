@@ -370,9 +370,9 @@ function AccuracyTestPanel({ studentId, existingRefs, onRefresh }: { studentId: 
             <div className={`h-3 rounded-full transition-all duration-500 ${getProgressColor(accuracyResult.overallAccuracy)}`} style={{ width: `${Math.min(100, accuracyResult.overallAccuracy)}%` }} />
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-white/60 rounded p-2"><p className="text-[10px] text-muted-foreground">Min</p><p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.minAccuracy)}`}>{accuracyResult.minAccuracy.toFixed(1)}%</p></div>
-            <div className="bg-white/60 rounded p-2"><p className="text-[10px] text-muted-foreground">Rata-rata</p><p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.overallAccuracy)}`}>{accuracyResult.overallAccuracy.toFixed(1)}%</p></div>
-            <div className="bg-white/60 rounded p-2"><p className="text-[10px] text-muted-foreground">Max</p><p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.maxAccuracy)}`}>{accuracyResult.maxAccuracy.toFixed(1)}%</p></div>
+            <div className="bg-white/60 dark:bg-gray-800/60 rounded p-2"><p className="text-[10px] text-muted-foreground">Min</p><p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.minAccuracy)}`}>{accuracyResult.minAccuracy.toFixed(1)}%</p></div>
+            <div className="bg-white/60 dark:bg-gray-800/60 rounded p-2"><p className="text-[10px] text-muted-foreground">Rata-rata</p><p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.overallAccuracy)}`}>{accuracyResult.overallAccuracy.toFixed(1)}%</p></div>
+            <div className="bg-white/60 dark:bg-gray-800/60 rounded p-2"><p className="text-[10px] text-muted-foreground">Max</p><p className={`text-sm font-bold ${getAccuracyColor(accuracyResult.maxAccuracy)}`}>{accuracyResult.maxAccuracy.toFixed(1)}%</p></div>
           </div>
           {accuracyResult.overallAccuracy < MIN_ACCURACY_PERCENT ? (
             <div className="flex items-start gap-2 bg-red-100 text-red-700 rounded p-2 text-xs">
@@ -511,7 +511,7 @@ export function SiswaDashboard() {
   if (studentsLoading) return <PageSkeleton />
   if (!me) return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-800">Dashboard Siswa</h2>
+      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Siswa</h2>
       <Card><CardContent className="p-8 text-center">
         <User className="h-12 w-12 text-gray-300 mx-auto mb-3" />
         <p className="text-muted-foreground">Data siswa tidak ditemukan</p>
@@ -527,7 +527,7 @@ export function SiswaDashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">Dashboard Siswa</h2>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Siswa</h2>
           <p className="text-sm text-muted-foreground">Selamat datang, {me.name}!</p>
         </div>
         <div className="flex gap-2">
@@ -545,12 +545,12 @@ export function SiswaDashboard() {
               <div className="relative px-4 py-3 text-white overflow-hidden" style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeColor}dd, ${themeColor}99)` }}>
                 <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 20% 80%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
                 <div className="relative flex items-center gap-2 mb-1">
-                  {schoolConfig.school_logo ? <img src={schoolConfig.school_logo} alt="Logo" className="h-8 w-8 rounded-full bg-white p-0.5 object-contain shadow-md" /> : <div className="h-8 w-8 rounded-full bg-white/25 backdrop-blur flex items-center justify-center shadow-md"><GraduationCap className="h-4 w-4 text-white" /></div>}
+                  {schoolConfig.school_logo ? <img src={schoolConfig.school_logo} alt="Logo" className="h-8 w-8 rounded-full bg-white dark:bg-gray-700 p-0.5 object-contain shadow-md" /> : <div className="h-8 w-8 rounded-full bg-white/25 backdrop-blur flex items-center justify-center shadow-md"><GraduationCap className="h-4 w-4 text-white" /></div>}
                   <div className="text-left min-w-0"><p className="font-bold text-sm leading-tight drop-shadow-sm truncate">{schoolConfig.school_name}</p><p className="text-[10px] opacity-90 leading-tight truncate">{schoolConfig.school_address}</p></div>
                 </div>
                 <p className="text-center text-[11px] font-semibold tracking-wider opacity-80">KARTU IDENTITAS SISWA</p>
               </div>
-              <div className="bg-white p-4">
+              <div className="bg-white dark:bg-gray-900 p-4">
                 <div className="flex flex-row gap-3 items-start">
                   <div className="shrink-0">
                     <div className="w-[60px] h-[76px] rounded-lg border-2 overflow-hidden shadow-sm" style={{ borderColor: themeColor + '30' }}>
@@ -559,7 +559,7 @@ export function SiswaDashboard() {
                   </div>
                   <div className="flex-1 min-w-0 space-y-0.5">
                     <p className="font-bold text-gray-900 text-sm leading-tight truncate">{me.name}</p>
-                    <div className="text-xs text-gray-700 space-y-0.5">
+                    <div className="text-xs text-gray-700 dark:text-gray-300 space-y-0.5">
                       <p className="flex items-center gap-1"><CreditCard className="h-3 w-3 text-gray-400 shrink-0" /> NISN: <span className="font-semibold">{me.nisn}</span></p>
                       <p className="flex items-center gap-1"><GraduationCap className="h-3 w-3 text-gray-400 shrink-0" /> Kelas: <span className="font-semibold">{me.class?.name || '-'}</span></p>
                       <p className="flex items-center gap-1"><BookOpen className="h-3 w-3 text-gray-400 shrink-0" /> Status: <Badge className={`text-[10px] px-1.5 py-0 ${me.status === 'AKTIF' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.status || 'AKTIF'}</Badge></p>
@@ -567,7 +567,7 @@ export function SiswaDashboard() {
                     </div>
                   </div>
                   <div className="shrink-0 flex flex-col items-center">
-                    <div className="w-[52px] h-[52px] sm:w-[72px] sm:h-[72px] rounded-lg border p-0.5 shadow-sm" style={{ borderColor: themeColor + '30' }}>{qrDataUrl ? <img src={qrDataUrl} alt="QR" className="w-full h-full" /> : <div className="w-full h-full bg-gray-50 rounded animate-pulse" />}</div>
+                    <div className="w-[52px] h-[52px] sm:w-[72px] sm:h-[72px] rounded-lg border p-0.5 shadow-sm" style={{ borderColor: themeColor + '30' }}>{qrDataUrl ? <img src={qrDataUrl} alt="QR" className="w-full h-full" /> : <div className="w-full h-full bg-gray-50 dark:bg-gray-800 rounded animate-pulse" />}</div>
                     <p className="text-[9px] text-gray-400 mt-0.5">Scan presensi</p>
                   </div>
                 </div>

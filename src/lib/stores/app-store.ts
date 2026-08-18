@@ -24,7 +24,12 @@ export type AppPage =
   | 'face-capture'
   | 'discipline-scan'
   | 'school-documents'
-  | 'duty-schedule';
+  | 'duty-schedule'
+  | 'terms'
+  | 'guide'
+  | 'audit-logs'
+  | 'security'
+  | 'super-admin';
 
 interface Notification {
   id: string;

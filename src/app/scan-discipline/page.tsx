@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import Webcam from 'react-webcam'
 import { toast } from 'sonner'
+import { Toaster as SonnerToaster } from '@/components/ui/sonner'
+import { ThemeToggle } from '@/components/theme-toggle'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,7 +20,7 @@ const ALLOWED_ROLES = ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GUR
 
 export default function ScanDisciplinePage() {
   const [authState, setAuthState] = useState<'loading' | 'login' | 'ok'>('loading')
-  const [loginUser, setLoginUser] = useState({ username: '', password: '' })
+  const [loginUser, setLoginUser] = useState({ username: '', password: '', termsAccepted: false })
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
@@ -69,13 +71,17 @@ export default function ScanDisciplinePage() {
 
   const handleLogin = async () => {
     if (!loginUser.username || !loginUser.password) { setLoginError('Isi username dan password'); return }
+    if (!loginUser.termsAccepted) {
+      setLoginError('Anda harus menyetujui Syarat dan Ketentuan terlebih dahulu')
+      return
+    }
     setLoginLoading(true)
     setLoginError('')
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginUser),
+        body: JSON.stringify({ username: loginUser.username, password: loginUser.password, acceptedTerms: true }),
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Login gagal') }
       const data = await res.json()
@@ -243,7 +249,7 @@ export default function ScanDisciplinePage() {
   // ── Login screen ──
   if (authState === 'login') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
         <div className="fixed top-4 left-4 z-10">
           <Button variant="outline" size="sm" onClick={() => window.location.href = '/'} className="h-10 bg-white/80 backdrop-blur shadow-sm">
             <Home className="h-4 w-4 mr-1" /> Beranda
@@ -264,6 +270,21 @@ export default function ScanDisciplinePage() {
                 placeholder="Username" onKeyDown={e => e.key === 'Enter' && handleLogin()} />
               <Input type="password" value={loginUser.password} onChange={e => setLoginUser(p => ({ ...p, password: e.target.value }))}
                 placeholder="Password" onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+              <label className="flex items-start gap-2 pt-1 text-xs text-gray-600 dark:text-gray-300 leading-relaxed cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={loginUser.termsAccepted}
+                  onChange={e => setLoginUser(p => ({ ...p, termsAccepted: e.target.checked }))}
+                  className="mt-0.5"
+                />
+                <span>
+                  Saya menyetujui{' '}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-2">
+                    Syarat dan Ketentuan Penggunaan
+                  </a>{' '}
+                  sebelum login.
+                </span>
+              </label>
               <Button className="w-full h-11" onClick={handleLogin} disabled={loginLoading}>
                 {loginLoading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <LogIn className="h-4 w-4 mr-2" />}
                 {loginLoading ? 'Memproses...' : 'Masuk'}
@@ -278,7 +299,7 @@ export default function ScanDisciplinePage() {
 
   if (authState === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
         <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
       </div>
     )
@@ -286,9 +307,15 @@ export default function ScanDisciplinePage() {
 
   // ── Main content ──
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
+      {/* Public page: mount the sonner Toaster here (the dashboard shell
+          normally owns it) or every toast.* call is a silent no-op. */}
+      <SonnerToaster />
+      <div className="fixed top-3 right-3 z-50">
+        <ThemeToggle />
+      </div>
       {/* Header */}
-      <div className="bg-white shadow-sm border-b px-4 py-3 flex items-center gap-3">
+      <div className="bg-white shadow-sm border-b px-4 py-3 flex items-center gap-3 dark:bg-gray-900 dark:border-gray-800">
         <Button variant="ghost" size="sm" onClick={() => window.location.href = '/'} className="h-10" title="Beranda">
           <Home className="h-4 w-4" />
         </Button>

@@ -18,6 +18,7 @@ import { StatisticsData, AttendanceRecord, BehaviorAlert } from './types'
 import { apiFetch } from '@/lib/api-fetch'
 import { DEMO_CREDS } from '@/lib/types'
 import { ScanSessionToggle } from './scan-session-toggle'
+import { useSocketEvent } from '@/lib/socket-client'
 
 const ROLE_CONFIG_KEY: Record<string, string> = {
   ADMIN: 'admin', KEPALA_SEKOLAH: 'kepsek', VP_KESISWAAN: 'vpkes',
@@ -61,7 +62,7 @@ function DemoLoginToggles() {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
       {DEMO_CREDS.map(d => (
-        <label key={d.role} className="flex items-center gap-2 text-xs cursor-pointer p-1.5 rounded hover:bg-gray-50">
+        <label key={d.role} className="flex items-center gap-2 text-xs cursor-pointer p-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800">
           <input type="checkbox" checked={toggles[d.role] ?? true} onChange={e => handleToggle(d.role, e.target.checked)} className="rounded" />
           {d.label}
         </label>
@@ -72,9 +73,24 @@ function DemoLoginToggles() {
 
 export function AdminDashboard() {
   const today = new Date().toISOString().split('T')[0]
-  const { data: stats, loading: sLoad, refetch: sRefetch } = useApiFetch<StatisticsData>(`/api/statistics?period=daily`)
-  const { data: attData, loading: aLoad } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?date=${today}`)
-  const { data: alertData, loading: alLoad } = useApiFetch<{ alerts: BehaviorAlert[] }>('/api/alerts')
+  const { data: stats, loading: sLoad, refetch: sRefetch } = useApiFetch<StatisticsData>(`/api/statistics?period=daily`, [], ['attendance:update', 'violation:update', 'good-deed:update'])
+  const { data: attData, loading: aLoad } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?date=${today}`, [], ['attendance:update'])
+  const { data: alertData, loading: alLoad } = useApiFetch<{ alerts: BehaviorAlert[] }>('/api/alerts', [], ['alert:new'])
+
+  // Live attendance updates from the socket mini-service.
+  useSocketEvent('attendance:update', (data: any) => {
+    const name = data?.student?.name
+    const action = data?.action || (data?.attendance?.checkOutTime ? 'checkout' : 'checkin')
+    const status = data?.status || data?.attendance?.status
+    const toastId = `live-att-${name || 'unknown'}`
+    if (action === 'checkout') {
+      toast.info(`${name || 'Siswa'} melakukan check-out`, { id: toastId })
+    } else if (status === 'IZIN') {
+      toast.info(`${name || 'Siswa'} dicatat izin`, { id: toastId })
+    } else {
+      toast.success(`${name || 'Siswa'} melakukan check-in${data?.isLate ? ' (terlambat)' : ''}`, { id: toastId })
+    }
+  })
 
   if (sLoad || aLoad) return <PageSkeleton />
 
@@ -94,7 +110,7 @@ export function AdminDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">Dashboard Admin</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Dashboard Admin</h2>
         <Button variant="outline" size="sm" onClick={() => { sRefetch(); toast.success('Data diperbarui') }}>
           <RefreshCw className="h-4 w-4 mr-1" /> Refresh
         </Button>

@@ -31,7 +31,7 @@ export function PermissionsPage() {
 
   const { data: studentsData } = useApiFetch<{ students: Student[] }>('/api/students')
   const { data: classesData } = useApiFetch<{ classes: ClassInfo[] }>('/api/classes')
-  const { data: permData, loading, refetch } = useApiFetch<{ permissions: PermissionRecord[] }>(`/api/permissions?status=${statusFilter !== 'all' ? statusFilter : ''}`, [statusFilter])
+  const { data: permData, loading, refetch } = useApiFetch<{ permissions: PermissionRecord[] }>(`/api/permissions?status=${statusFilter !== 'all' ? statusFilter : ''}`, [statusFilter], ['permission:update'])
 
   const myChild = studentsData?.students?.find(s => s.parents?.some(p => p.user.id === user?.id))
   const myClass = classesData?.classes?.find(c => c.homeroomTeacherId === user?.id)
@@ -92,7 +92,7 @@ export function PermissionsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">Izin</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Izin</h2>
         <Button data-permission-create className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
           if (user?.role === 'ORANG_TUA' && myChild) {
             setFormData(prev => ({ ...prev, studentId: myChild.id }))
@@ -227,7 +227,7 @@ export function PermissionsPage() {
       {/* Attachment Preview Modal */}
       {previewAttach && previewAttach.attachmentData && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewAttach(null)}>
-          <div className="relative bg-white rounded-xl max-w-lg w-full max-h-[80vh] overflow-auto p-4" onClick={e => e.stopPropagation()}>
+          <div className="relative bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full max-h-[80vh] overflow-auto p-4" onClick={e => e.stopPropagation()}>
             <button onClick={() => setPreviewAttach(null)} className="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full w-8 h-8 flex items-center justify-center text-sm">✕</button>
             <p className="font-medium text-sm mb-3">Lampiran: {previewAttach.attachmentName || 'Dokumen'}</p>
             {previewAttach.attachmentType === 'application/pdf' ? (

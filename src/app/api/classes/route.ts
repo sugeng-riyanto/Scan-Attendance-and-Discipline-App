@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,7 +13,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const academicYearId = searchParams.get('academicYearId');
 
-    const where: any = {};
+    // Per-school isolation: only this school's classes.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.schoolWhere };
     if (academicYearId) where.academicYearId = academicYearId;
 
     const classes = await db.class.findMany({
@@ -46,8 +49,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 });
     }
 
+    // Per-school isolation: new class bound to the actor's school.
+    const scope = await getSchoolScope(auth);
     const cls = await db.class.create({
-      data: { name, level, academicYearId, homeroomTeacherId: homeroomTeacherId || null },
+      data: { name, level, schoolId: scope.schoolId, academicYearId, homeroomTeacherId: homeroomTeacherId || null },
       include: { homeroomTeacher: { select: { name: true } }, academicYear: { select: { name: true } } },
     });
 
@@ -69,6 +74,13 @@ export async function PUT(request: NextRequest) {
     const { id, ...data } = body;
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
+
+    // Per-school isolation: only allow updating a class in the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.class.findFirst({ where: { id, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Kelas tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
 
     // Handle empty homeroomTeacherId (set to null instead of empty string)
     if (data.homeroomTeacherId === '') {
@@ -100,8 +112,15 @@ export async function DELETE(request: NextRequest) {
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
+    // Per-school isolation: only allow deleting a class in the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.class.findFirst({ where: { id, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Kelas tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     // Check if class has students
-    const studentCount = await db.student.count({ where: { classId: id } });
+    const studentCount = await db.student.count({ where: { classId: id, ...scope.schoolWhere } });
     if (studentCount > 0) {
       return NextResponse.json(
         { error: `Kelas masih memiliki ${studentCount} siswa. Pindahkan siswa terlebih dahulu.` },

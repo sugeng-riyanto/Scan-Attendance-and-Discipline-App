@@ -1,5 +1,20 @@
-@import "tailwindcss";
+/*
+ * Why `source(none)` + explicit `@source`?
+ *
+ * Tailwind v4's automatic source detection walks the whole project tree with
+ * its native (oxide) scanner, which hangs forever under Bun — the postcss
+ * worker spins at 100% CPU and every page compile wedges (Turbopack AND
+ * webpack). Disabling auto-detection and listing the source dirs explicitly
+ * compiles this file in ~200 ms.
+ *
+ * Keep the `@source` globs in sync with wherever Tailwind classes live.
+ * (The paths are relative to this stylesheet: src/app/globals.css.)
+ */
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
+
+@source "../app";
+@source "../components";
 
 @custom-variant dark (&:is(.dark *));
 

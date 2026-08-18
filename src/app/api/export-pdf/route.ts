@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
+import { logAudit } from '@/lib/audit';
 
 // PDF-like HTML report generation (returns HTML that can be printed to PDF client-side)
 // This approach avoids server-side PDF dependencies
@@ -27,11 +29,13 @@ export async function GET(request: NextRequest) {
     const configMap: Record<string, string> = {};
     configs.forEach(c => { configMap[c.key] = c.value; });
 
-    const schoolName = configMap.school_name || 'SMP-SMA Nusantara';
-    const schoolAddress = configMap.school_address || 'Jl. Pendidikan No. 1, Indonesia';
+    const schoolName = configMap.school_name || 'Attendance Application';
+    const schoolAddress = configMap.school_address || 'Jl. Pala Raya No. 51, Pamulang, Tangerang Selatan, Banten';
     const themeColor = configMap.theme_color || '#10b981';
 
-    const studentWhere: any = {};
+    // Per-school isolation: PDF exports only cover this school's data.
+    const scope = await getSchoolScope(auth);
+    const studentWhere: any = { ...scope.schoolWhere };
     if (classId && classId !== 'all') studentWhere.classId = classId;
 
     let title = '';
@@ -322,6 +326,8 @@ export async function GET(request: NextRequest) {
   </div>
 </body>
 </html>`;
+
+    await logAudit({ action: 'EXPORT', category: 'EXPORT', severity: 'INFO', userId: auth.userId, username: auth.username, role: auth.role, details: `Ekspor PDF ${type} (${startDate || 'awal bulan'} s.d. ${endDate || 'sekarang'})` });
 
     return new NextResponse(html, {
       headers: {

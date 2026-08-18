@@ -36,6 +36,9 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    // Unit tests run under `bun test`, which transpiles without typechecking;
+    // `bun:test` types live in the (uninstalled) bun-types package.
+    "**/*.test.ts"
   ]
 }

@@ -30,7 +30,7 @@ export function AttendanceRecordsPage() {
   if (classFilter && classFilter !== 'all') params.set('classId', classFilter)
   if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter)
 
-  const { data: attData, loading, refetch } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?${params.toString()}`, [startDate, endDate, classFilter, statusFilter])
+  const { data: attData, loading, refetch } = useApiFetch<{ attendances: AttendanceRecord[]; summary: any }>(`/api/attendance?${params.toString()}`, [startDate, endDate, classFilter, statusFilter], ['attendance:update'])
 
   const classes = classesData?.classes || []
   const attendances = attData?.attendances || []
@@ -43,7 +43,7 @@ export function AttendanceRecordsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">Rekap Presensi</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Rekap Presensi</h2>
         <Button variant="outline" size="sm" onClick={() => refetch()}><RefreshCw className="h-4 w-4 mr-1" /> Refresh</Button>
       </div>
 
@@ -98,7 +98,7 @@ export function AttendanceRecordsPage() {
             <div className="overflow-x-auto">
               <div className="max-h-[50vh] overflow-y-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-white z-10">
+                  <TableHeader className="sticky top-0 bg-white dark:bg-gray-900 z-10">
                     <TableRow>
                       <TableHead className="text-xs">Nama</TableHead>
                       <TableHead className="text-xs">Kelas</TableHead>

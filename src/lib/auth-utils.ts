@@ -55,6 +55,7 @@ export function getAuthUser(request: NextRequest): JwtPayload | null {
 }
 
 export const rolePermissions: Record<string, string[]> = {
+  SUPER_ADMIN: ['all'],
   ADMIN: ['all'],
   KEPALA_SEKOLAH: ['view_all', 'view_statistics', 'view_escalation', 'manage_alerts'],
   VP_KESISWAAN: ['view_all', 'view_discipline', 'manage_violations', 'manage_good_deeds', 'view_escalation', 'manage_categories'],
@@ -71,5 +72,8 @@ export function hasPermission(role: string, permission: string): boolean {
 }
 
 export function requireRole(role: string, allowedRoles: string[]): boolean {
+  // SUPER_ADMIN is the multi-tenant administrator: it can access every role's
+  // pages and APIs (per-school isolation still limits what data it mutates).
+  if (role === 'SUPER_ADMIN') return true;
   return allowedRoles.includes(role);
 }

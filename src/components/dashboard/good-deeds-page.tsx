@@ -34,7 +34,7 @@ export function GoodDeedsPage() {
   const effectiveClassFilter = authUser?.role === 'WALI_KELAS' && myClass ? myClass.id : classFilter
 
   const { data: goodData, loading, refetch } = useApiFetch<{ goodDeeds: GoodDeedRecord[] }>(
-    `/api/good-deeds?classId=${effectiveClassFilter !== 'all' ? effectiveClassFilter : ''}`, [effectiveClassFilter]
+    `/api/good-deeds?classId=${effectiveClassFilter !== 'all' ? effectiveClassFilter : ''}`, [effectiveClassFilter], ['good-deed:update']
   )
 
   const goodDeeds = goodData?.goodDeeds || []
@@ -68,7 +68,7 @@ export function GoodDeedsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">Kebaikan</h2>
+        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Kebaikan</h2>
         <div className="flex gap-2">
           {(authUser?.role === 'ADMIN' || authUser?.role === 'VP_KESISWAAN') && (
             <ImportXlsxButton type="good-deed-categories" onDone={refetch} />

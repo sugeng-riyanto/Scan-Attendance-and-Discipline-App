@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
+import { emitSocketEvent } from '@/lib/socket-server';
 
 /**
  * Helper: combine a date string ("2024-01-15") with a time string ("07:00")
@@ -32,7 +34,9 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type');
     const classId = searchParams.get('classId');
 
-    const where: any = {};
+    // Per-school isolation: only this school's permissions.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.studentWhere };
     if (status && status !== 'all') where.status = status;
     if (studentId) where.studentId = studentId;
     if (type) where.type = type;
@@ -76,6 +80,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Per-school isolation: the student must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id: studentId, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
+    }
+
     // Validate student exists
     const student = await db.student.findUnique({
       where: { id: studentId },
@@ -117,6 +128,8 @@ export async function POST(request: NextRequest) {
       include: { student: { include: { class: true } } },
     });
 
+    emitSocketEvent('permission:update', { permission, action: 'created' });
+
     return NextResponse.json({ permission }, { status: 201 });
   } catch (error: any) {
     console.error('Create permission error:', error);
@@ -145,6 +158,11 @@ export async function PUT(request: NextRequest) {
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: 'Status tidak valid' }, { status: 400 });
     }
+
+    // Per-school isolation: permission must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    const owned = await db.permission.findFirst({ where: { id, ...scope.studentWhere }, select: { id: true } });
+    if (!owned) return NextResponse.json({ error: 'Izin tidak ditemukan di sekolah Anda' }, { status: 404 });
 
     const permission = await db.permission.update({
       where: { id },
@@ -176,8 +194,19 @@ export async function PUT(request: NextRequest) {
             notes: `Izin: ${permission.reason}`,
           },
         });
+        emitSocketEvent('attendance:checkin', {
+          action: 'checkin',
+          student: permission.student
+            ? { id: permission.student.id, name: permission.student.name, className: permission.student.class?.name }
+            : undefined,
+          attendance: { status: 'IZIN', permissionId: permission.id },
+          status: 'IZIN',
+          isLate: false,
+        });
       }
     }
+
+    emitSocketEvent('permission:update', { permission, action: 'updated' });
 
     return NextResponse.json({ permission });
   } catch (error: any) {
@@ -202,6 +231,11 @@ export async function DELETE(request: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
     }
+
+    // Per-school isolation: permission must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    const owned = await db.permission.findFirst({ where: { id, ...scope.studentWhere }, select: { id: true } });
+    if (!owned) return NextResponse.json({ error: 'Izin tidak ditemukan di sekolah Anda' }, { status: 404 });
 
     // Check if any attendance references this permission
     const existingAtt = await db.attendance.findFirst({

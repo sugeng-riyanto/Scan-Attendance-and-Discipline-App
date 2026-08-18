@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 
 export async function GET(request: NextRequest) {
   try {
@@ -61,7 +62,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const studentWhere: any = {};
+    // Per-school isolation: statistics only cover this school's data.
+    const scope = await getSchoolScope(auth);
+    const studentWhere: any = { ...scope.schoolWhere };
     if (classId && classId !== 'all') studentWhere.classId = classId;
 
     // Attendance statistics
@@ -101,6 +104,7 @@ export async function GET(request: NextRequest) {
 
     // Class comparison
     const classes = await db.class.findMany({
+      where: scope.schoolWhere,
       include: { _count: { select: { students: true } } },
     });
 

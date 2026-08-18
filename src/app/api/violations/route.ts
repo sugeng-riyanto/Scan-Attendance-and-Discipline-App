@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getBehaviorLevel } from '@/lib/attendance-utils';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
+import { emitSocketEvent } from '@/lib/socket-server';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +21,9 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
 
-    const where: any = {};
+    // Per-school isolation: only this school's violations.
+    const scope = await getSchoolScope(auth);
+    const where: any = { ...scope.studentWhere };
     if (studentId) where.studentId = studentId;
     if (categoryId) where.categoryId = categoryId;
     if (startDate && endDate) {
@@ -63,6 +67,13 @@ export async function POST(request: NextRequest) {
 
     if (!studentId || !categoryId || !date || !recordedBy) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 });
+    }
+
+    // Per-school isolation: the student must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    if (!scope.isSuperAdmin && scope.schoolId) {
+      const owned = await db.student.findFirst({ where: { id: studentId, ...scope.schoolWhere }, select: { id: true } });
+      if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
     }
 
     // Get category for default points
@@ -112,7 +123,7 @@ export async function POST(request: NextRequest) {
         }
 
         for (const at of alertTargets) {
-          await db.behaviorAlert.create({
+          const alert = await db.behaviorAlert.create({
             data: {
               studentId,
               alertType: at.alertType,
@@ -121,9 +132,12 @@ export async function POST(request: NextRequest) {
               targetRole: at.targetRole,
             },
           });
+          emitSocketEvent('alert:new', alert);
         }
       }
     }
+
+    emitSocketEvent('violation:new', { violation });
 
     return NextResponse.json({ violation }, { status: 201 });
   } catch (error) {
@@ -144,7 +158,9 @@ export async function DELETE(request: NextRequest) {
 
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
-    const violation = await db.violation.findUnique({ where: { id } });
+    // Per-school isolation: violation must belong to the actor's school.
+    const scope = await getSchoolScope(auth);
+    const violation = await db.violation.findFirst({ where: { id, ...scope.studentWhere } });
     if (!violation) return NextResponse.json({ error: 'Pelanggaran tidak ditemukan' }, { status: 404 });
 
     // Reduce student points
