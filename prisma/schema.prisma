@@ -504,3 +504,18 @@ model DataRightsRequest {
   @@index([status])
   @@index([createdAt])
 }
+
+// Terms & Conditions content stored in DB so ADMIN / SUPER_ADMIN can edit
+// it without redeploying. Only one row is ever active at a time.
+model TermsContent {
+  id          String   @id @default(cuid())
+  title       String   @default("Terms and Conditions of Use")
+  body        String   // Full T&C text (plain text or simple markdown)
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  updatedBy   String?  // username of the last editor
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+}

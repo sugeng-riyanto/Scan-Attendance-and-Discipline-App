@@ -20,6 +20,7 @@ const PUBLIC_PATHS = [
   '/api/scan-session',
   '/api/school-config',
   '/api/schools/public',
+  '/api/terms-content',  // GET is public so /terms page works without login
   '/api/offline-sync',
   '/api/import-template',
   '/_next',
