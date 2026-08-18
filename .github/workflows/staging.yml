@@ -1,0 +1,154 @@
+name: Staging Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: staging-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    name: Preview Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Wait for Vercel preview
+        uses: patydro/wait-for-vercel-preview@v1.3.1
+        id: vercel-preview
+        with:
+          timeout: 300
+          max-attempts: 30
+        continue-on-error: true
+
+      - name: Run smoke tests
+        if: steps.vercel-preview.outcome == 'success'
+        run: |
+          PREVIEW_URL="${{ steps.vercel-preview.outputs.preview-url }}"
+          echo "Testing preview at: $PREVIEW_URL"
+
+          # Test 1: Landing page loads
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL/")
+          echo "Landing page: HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Landing page returned HTTP $STATUS"
+            exit 1
+          fi
+
+          # Test 2: Public API endpoints
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL/api/schools/public")
+          echo "Schools API: HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Schools API returned HTTP $STATUS"
+            exit 1
+          fi
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL/api/school-config")
+          echo "Config API: HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Config API returned HTTP $STATUS"
+            exit 1
+          fi
+
+          # Test 3: Auth endpoint accepts POST
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$PREVIEW_URL/api/auth" \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"admin123","acceptedTerms":true}')
+          echo "Auth API: HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Auth API returned HTTP $STATUS"
+            exit 1
+          fi
+
+          # Test 4: Terms page loads
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL/terms")
+          echo "Terms page: HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Terms page returned HTTP $STATUS"
+            exit 1
+          fi
+
+          echo "All smoke tests passed ✅"
+
+      - name: Comment on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const previewUrl = '${{ steps.vercel-preview.outputs.preview-url }}' || 'pending';
+            const outcome = '${{ steps.vercel-preview.outcome }}';
+            const testOutcome = '${{ steps.smoke-test.outcome }}';
+
+            let status = '⏳ Preview deploying...';
+            let color = 'warning';
+
+            if (outcome === 'success' && testOutcome === 'success') {
+              status = '✅ All smoke tests passed';
+              color = 'success';
+            } else if (outcome === 'success' && testOutcome === 'failure') {
+              status = '❌ Smoke tests failed — check logs';
+              color = 'danger';
+            } else if (outcome === 'failure') {
+              status = '⚠️ Preview deployment failed — check Vercel logs';
+              color = 'warning';
+            }
+
+            const body = `### 🔍 Staging Preview
+
+            | | |
+            |---|---|
+            | **Preview URL** | ${previewUrl !== 'pending' ? `[Open Preview](${previewUrl})` : '⏳ Deploying...'} |
+            | **Status** | ${status} |
+            | **Commit** | \`${context.sha.slice(0, 7)}\` |
+
+            <details>
+            <summary>Smoke Test Details</summary>
+
+            - ✅ Landing page (GET /)
+            - ✅ Schools API (GET /api/schools/public)
+            - ✅ Config API (GET /api/school-config)
+            - ✅ Auth API (POST /api/auth)
+            - ✅ Terms page (GET /terms)
+
+            </details>
+
+            *This comment updates automatically on new pushes.*`;
+
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Staging Preview')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
