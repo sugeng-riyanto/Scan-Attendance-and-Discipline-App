@@ -140,6 +140,130 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'Preferensi pengingat disimpan', reminderEnabled, reminderType, reminderLevel });
     }
 
+    if (action === 'export') {
+      // UU PDP Art. 4(1): right of access — return all personal data
+      // associated with this user account.
+      const student = await db.student.findUnique({
+        where: { userId: user.id },
+        include: {
+          class: { select: { id: true, name: true, level: true } },
+          academicYear: { select: { id: true, name: true } },
+        },
+      });
+      const parent = await db.parent.findUnique({
+        where: { userId: user.id },
+        include: { student: { select: { id: true, nisn: true, name: true } } },
+      });
+      const teacher = await db.teacher.findUnique({ where: { userId: user.id } });
+
+      let attendance: any[] = [];
+      let violations: any[] = [];
+      let goodDeeds: any[] = [];
+      let permissions: any[] = [];
+      let faceReferences: any[] = [];
+
+      if (student) {
+        [attendance, violations, goodDeeds, permissions] = await Promise.all([
+          db.attendance.findMany({
+            where: { studentId: student.id },
+            orderBy: { date: 'desc' },
+            take: 365,
+          }),
+          db.violation.findMany({
+            where: { studentId: student.id },
+            include: { category: { select: { name: true, code: true } } },
+            orderBy: { date: 'desc' },
+            take: 100,
+          }),
+          db.goodDeed.findMany({
+            where: { studentId: student.id },
+            include: { category: { select: { name: true, code: true } } },
+            orderBy: { date: 'desc' },
+            take: 100,
+          }),
+          db.permission.findMany({
+            where: { studentId: student.id },
+            orderBy: { date: 'desc' },
+            take: 50,
+          }),
+        ]);
+        // Face references — metadata only, no base64 blobs
+        const refs = await db.faceReference.findMany({
+          where: { studentId: student.id },
+          select: { id: true, captureIndex: true, captureMethod: true, quality: true, isActive: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        faceReferences = refs;
+      }
+
+      // Audit trail for this user
+      const auditLogs = await db.auditLog.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          action: true, category: true, severity: true, details: true, ip: true, createdAt: true,
+        },
+      });
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        exportedBy: 'Attendance Application (UU PDP Art. 4(1))',
+        profile: {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          role: user.role,
+          email: user.email,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+        },
+        student: student ? {
+          nisn: student.nisn,
+          name: student.name,
+          gender: student.gender,
+          address: student.address,
+          email: student.email,
+          phone: student.phone,
+          status: student.status,
+          className: student.class?.name,
+          classLevel: student.class?.level,
+          academicYear: student.academicYear?.name,
+          totalViolationPoints: student.totalViolationPoints,
+          totalGoodPoints: student.totalGoodPoints,
+        } : null,
+        parent: parent ? {
+          relationship: parent.relationship,
+          studentName: parent.student?.name,
+          studentNisn: parent.student?.nisn,
+        } : null,
+        teacher: teacher ? {
+          nip: teacher.nip,
+          subjects: teacher.subjects,
+        } : null,
+        attendance,
+        violations,
+        goodDeeds,
+        permissions,
+        faceReferences,
+        auditLogs,
+      };
+
+      // Log the export request
+      await logAudit({
+        action: 'DATA_EXPORT',
+        category: 'ACCOUNT',
+        severity: 'INFO',
+        userId: user.id,
+        username: user.username,
+        role: user.role,
+        ip,
+        details: 'User exported personal data (UU PDP Art. 4(1))',
+      });
+
+      return NextResponse.json(exportData);
+    }
+
     return NextResponse.json({ error: 'Aksi tidak dikenal' }, { status: 400 });
   } catch (error) {
     console.error('Account POST error:', error);

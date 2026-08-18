@@ -221,13 +221,15 @@ export function AccountSettings() {
             </div>
             <Button variant="outline" size="sm" onClick={async () => {
               try {
-                await apiFetch('/api/data-rights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'EXPORT', details: 'User requested personal data export' }) })
-                const data = await apiFetch<{ profile: any }>('/api/account')
-                const blob = new Blob([JSON.stringify(data.profile, null, 2)], { type: 'application/json' })
+                // Fetch full personal data export from the account API (UU PDP Art. 4(1))
+                const exportData = await apiFetch<any>('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'export' }) })
+                // Also log the request in the data-rights system
+                await apiFetch('/api/data-rights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'EXPORT', details: 'User requested personal data export' }) }).catch(() => {})
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a'); a.href = url; a.download = `my-data-${new Date().toISOString().slice(0,10)}.json`; a.click()
                 URL.revokeObjectURL(url)
-                toast.success('Data exported and request logged')
+                toast.success('Data exported successfully')
               } catch { toast.error('Export not available') }
             }}>
               <Download className="h-4 w-4 mr-1" />Export
