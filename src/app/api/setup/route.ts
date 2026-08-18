@@ -54,6 +54,8 @@ export async function POST(request: NextRequest) {
       await db.$executeRawUnsafe(`DELETE FROM "SchoolConfig"`);
       await db.$executeRawUnsafe(`DELETE FROM "SchoolDocument"`);
       await db.$executeRawUnsafe(`DELETE FROM "Subscription"`);
+      await db.$executeRawUnsafe(`DELETE FROM "TermsContent"`);
+      await db.$executeRawUnsafe(`DELETE FROM "DataRightsRequest"`);
       await db.$executeRawUnsafe(`DELETE FROM "School"`);
       await db.$executeRawUnsafe(`DELETE FROM "User"`);
     } else {
@@ -638,6 +640,54 @@ export async function POST(request: NextRequest) {
     ];
     for (const wc of welcomeConfigs) {
       await db.schoolConfig.create({ data: wc });
+    }
+
+    // 13b. Seed default Terms & Conditions (single active version, global)
+    const defaultTermsBody = `1. Legal Basis
+
+This application complies with Indonesian Law No. 27/2022 on Personal Data Protection (UU PDP) and Law No. 35/2014 on Child Protection (UU Perlindungan Anak), which amends Law No. 23/2002.
+
+Student data is child data receiving special protection. Processing of child data is carried out only with parental or guardian consent and solely for educational and disciplinary purposes at the school.
+
+2. Data Collected
+
+The school only collects necessary data: student identity (name, NISN, class), attendance records, violation and merit records, face photos for attendance verification, and location during scanning. The principle of data minimization is applied — no data is collected without clear necessity.
+
+3. How Data Is Managed
+
+- Data is stored on the school's server and protected with passwords and access restrictions.
+- Each user can only view data according to their role (Administrator, Principal, Teacher, etc.).
+- Account passwords are stored in encrypted form and cannot be read by anyone.
+- Face photos are used solely for attendance verification and are not shared.
+- Data is not sold, exchanged, or transferred to third parties without consent, except as required by law.
+
+4. Your Rights
+
+You have the right to request information about stored data, correct inaccurate data, and request data deletion as per regulations. For student data, these rights are exercised by parents or guardians through the school administration.
+
+5. Breach Response
+
+In the event of a data breach, the school will:
+- Secure the system immediately to prevent the breach from spreading.
+- Investigate the cause and assess affected data.
+- Notify affected users, parents, or guardians within 72 hours, and report to the relevant authority as required by UU PDP.
+- Fix vulnerabilities to prevent recurrence.
+
+Users are also obligated to maintain the confidentiality of their accounts. Any activity performed with your account is your responsibility.
+
+These terms may be updated at any time. Changes will be announced through this application.`;
+
+    const existingTerms = await db.termsContent.findFirst();
+    if (!existingTerms) {
+      await db.termsContent.create({
+        data: {
+          title: 'Terms and Conditions of Use',
+          body: defaultTermsBody,
+          version: 1,
+          isActive: true,
+          updatedBy: 'SYSTEM',
+        },
+      });
     }
 
     // 14. Notify open dashboards that the database was wiped and re-seeded so
