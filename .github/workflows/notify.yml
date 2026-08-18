@@ -1,0 +1,161 @@
+name: Alert Notifications
+
+on:
+  issues:
+    types: [labeled]
+
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Notification message'
+        required: true
+      severity:
+        description: 'Severity level'
+        required: true
+        default: 'info'
+        type: choice
+        options:
+          - info
+          - warning
+          - critical
+
+jobs:
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'urgent')) ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Prepare notification
+        id: prepare
+        run: |
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            TITLE="🚨 ${{ github.event.issue.title }}"
+            BODY="${{ github.event.issue.body }}"
+            URL="${{ github.event.issue.html_url }}"
+            SEVERITY="critical"
+          else
+            TITLE="ℹ️ ${{ inputs.message }}"
+            BODY="Manual notification from ${{ github.actor }}"
+            URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            SEVERITY="${{ inputs.severity }}"
+          fi
+
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "severity=$SEVERITY" >> $GITHUB_OUTPUT
+          echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        if: vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ vars.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.prepare.outputs.title }}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ steps.prepare.outputs.repo }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Severity:*\n${{ steps.prepare.outputs.severity }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Time:*\n${{ steps.prepare.outputs.timestamp }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.prepare.outputs.body }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ steps.prepare.outputs.url }}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+      - name: Send email notification
+        if: vars.NOTIFICATION_EMAIL != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ vars.SMTP_SERVER || 'smtp.gmail.com' }}
+          server_port: ${{ vars.SMTP_PORT || '587' }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "${{ steps.prepare.outputs.title }}"
+          to: ${{ vars.NOTIFICATION_EMAIL }}
+          from: "Attendance App <${{ vars.SMTP_FROM || 'noreply@yourdomain.com' }}>"
+          body: |
+            ${{ steps.prepare.outputs.title }}
+
+            Repository: ${{ steps.prepare.outputs.repo }}
+            Severity: ${{ steps.prepare.outputs.severity }}
+            Time: ${{ steps.prepare.outputs.timestamp }}
+
+            Details:
+            ${{ steps.prepare.outputs.body }}
+
+            View: ${{ steps.prepare.outputs.url }}
+
+      - name: Send Telegram notification
+        if: vars.TELEGRAM_BOT_TOKEN != '' && vars.TELEGRAM_CHAT_ID != ''
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          to: ${{ vars.TELEGRAM_CHAT_ID }}
+          message: |
+            ${{ steps.prepare.outputs.title }}
+
+            📁 ${{ steps.prepare.outputs.repo }}
+            ⚡ ${{ steps.prepare.outputs.severity }}
+            🕐 ${{ steps.prepare.outputs.timestamp }}
+
+            ${{ steps.prepare.outputs.body }}
+
+            🔗 ${{ steps.prepare.outputs.url }}
+
+      - name: Summary
+        run: |
+          echo "## 📢 Notification Sent" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Title** | ${{ steps.prepare.outputs.title }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Severity** | ${{ steps.prepare.outputs.severity }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Channels** | Slack, Email, Telegram |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Time** | ${{ steps.prepare.outputs.timestamp }} |" >> $GITHUB_STEP_SUMMARY
