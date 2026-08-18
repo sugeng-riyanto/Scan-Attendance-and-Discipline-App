@@ -7,16 +7,34 @@ import { logAudit } from '@/lib/audit';
 const EDIT_ROLES = ['ADMIN', 'KEPALA_SEKOLAH'];
 
 // GET: Return the active T&C document.
-//   - Authenticated: returns the active record (or null).
+//   - ?history=true (admin only): returns all versions for the history viewer.
 //   - Public (no auth): returns the active record so /terms page works without login.
 export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const wantHistory = searchParams.get('history') === 'true';
+
+    if (wantHistory) {
+      // Admin-only: return all versions (body included for diff comparison)
+      const auth = getAuthUser(request);
+      if (!auth || !requireRole(auth.role, EDIT_ROLES)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      const all = await db.termsContent.findMany({
+        orderBy: { version: 'desc' },
+        select: {
+          id: true, title: true, body: true, version: true,
+          isActive: true, updatedBy: true, createdAt: true, updatedAt: true,
+        },
+      });
+      return NextResponse.json({ versions: all });
+    }
+
+    // Default: return the active version (or latest if none active)
     const terms = await db.termsContent.findFirst({
       where: { isActive: true },
       orderBy: { version: 'desc' },
     });
-    // If no active version, return the latest version (even if inactive) for
-    // the admin editor to have something to start from.
     const latest = terms ?? await db.termsContent.findFirst({
       orderBy: { version: 'desc' },
     });

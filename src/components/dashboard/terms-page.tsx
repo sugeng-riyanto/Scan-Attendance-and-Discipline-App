@@ -1,13 +1,14 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { AuthUser } from '@/lib/stores/auth-store'
 import { roleLabels } from '@/lib/attendance-utils'
 import { apiFetch } from '@/lib/api-fetch'
+import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
 import { toast } from 'sonner'
 import {
-  ScrollText, ShieldCheck, Lock, KeyRound, AlertTriangle, FileText,
-  Edit3, Plus, Trash2, CheckCircle, Save, X, History
+  ScrollText, ShieldCheck, FileText,
+  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -146,13 +147,32 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
     }
   }
 
-  const loadAllVersions = async () => {
+  const [versions, setVersions] = useState<TermsRecord[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [expandedVersions, setExpandedVersions] = useState<Set<string>>(new Set())
+  const [comparePair, setComparePair] = useState<[number, number] | null>(null)
+
+  const loadHistory = async () => {
+    if (showHistory) { setShowHistory(false); return }
+    setHistoryLoading(true)
     try {
-      // We only have GET which returns the active one.
-      // For history, we rely on the single GET + audit logs.
-      // For now, store versions in local state when they're fetched.
-      setShowHistory(!showHistory)
-    } catch { /* ignore */ }
+      const data = await apiFetch<{ versions: TermsRecord[] }>('/api/terms-content?history=true')
+      setVersions(data.versions)
+      setShowHistory(true)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load history')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const toggleExpand = (id: string) => {
+    setExpandedVersions(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   const saveTerms = async (activate = true) => {
@@ -338,6 +358,9 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
               {terms ? `Version ${terms.version} — Last edited by ${terms.updatedBy || 'unknown'} on ${new Date(terms.updatedAt).toLocaleString()}` : 'No published version yet'}
             </span>
             <div className="flex gap-2">
+              <Button variant="ghost" size="sm" className="text-xs h-7" onClick={loadHistory} disabled={historyLoading}>
+                <History className="h-3 w-3 mr-1" /> {showHistory ? 'Hide History' : 'Version History'}
+              </Button>
               {terms && (
                 <Button variant="ghost" size="sm" className="text-xs h-7" onClick={deleteTerms} disabled={busy}>
                   <Trash2 className="h-3 w-3 mr-1" /> Delete Version
@@ -348,9 +371,76 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
         </>
       )}
 
+      {/* Version History Panel (admin only) */}
+      {canEdit && showHistory && (
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <History className="h-4 w-4" /> Version History ({versions.length} versions)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {versions.length === 0 && <p className="text-xs text-muted-foreground">No versions found.</p>}
+            {versions.map((v, idx) => {
+              const isExpanded = expandedVersions.has(v.id)
+              const prevVersion = versions[idx + 1] // versions are sorted desc
+              const diff = prevVersion ? computeDiff(prevVersion.body, v.body) : null
+              const stats = diff ? diffStats(diff) : null
+              return (
+                <div key={v.id} className="border rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => toggleExpand(v.id)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 text-sm"
+                  >
+                    <div className="flex items-center gap-2">
+                      {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      <Badge variant={v.isActive ? 'default' : 'outline'} className="text-xs">
+                        v{v.version}{v.isActive ? ' (active)' : ''}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(v.updatedAt).toLocaleString()} — by {v.updatedBy || 'unknown'}
+                      </span>
+                    </div>
+                    {stats && (
+                      <div className="flex gap-1 text-xs">
+                        {stats.added > 0 && <span className="text-green-600 dark:text-green-400">+{stats.added}</span>}
+                        {stats.removed > 0 && <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>}
+                      </div>
+                    )}
+                  </button>
+                  {isExpanded && (
+                    <div className="border-t px-3 py-2 text-xs font-mono bg-gray-50 dark:bg-gray-900/50 max-h-80 overflow-y-auto">
+                      {diff ? (
+                        <div className="space-y-0.5">
+                          {diff.map((line, i) => (
+                            <DiffLineView key={i} line={line} />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground italic">Initial version — no previous version to compare.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
+
       <p className="text-xs text-muted-foreground">
         These terms may be updated at any time. Changes will be announced through this application.
       </p>
     </div>
   )
+}
+
+function DiffLineView({ line }: { line: DiffLine }) {
+  if (line.tag === '=') {
+    return <div className="text-gray-500 dark:text-gray-400 px-2">{line.text || ' '}</div>
+  }
+  if (line.tag === '+') {
+    return <div className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2">+ {line.text}</div>
+  }
+  return <div className="bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2">- {line.text}</div>
 }
