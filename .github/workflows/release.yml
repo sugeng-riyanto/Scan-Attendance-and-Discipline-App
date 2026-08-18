@@ -1,0 +1,156 @@
+name: Release & Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Only one release at a time
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag, Deploy & Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Determine version bump
+        id: version
+        run: |
+          # Get last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
+
+          # Analyze commits since last tag
+          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s" -20)
+
+          # Determine bump type
+          if echo "$COMMITS" | grep -qiE "^feat!:"; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:|BREAKING CHANGE"; then
+            BUMP="minor"
+          else
+            BUMP="patch"
+          fi
+          echo "bump=$BUMP" >> $GITHUB_OUTPUT
+
+          # Calculate new version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${LAST_TAG#v}"
+          case $BUMP in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "📊 Version: $LAST_TAG → $NEW_VERSION ($BUMP)"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LAST_TAG="${{ steps.version.outputs.last_tag }}"
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          # Collect commits by type
+          FEATURES=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s" --grep="^feat" 2>/dev/null || echo "")
+          FIXES=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s" --grep="^fix" 2>/dev/null || echo "")
+          DOCS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s" --grep="^docs" 2>/dev/null || echo "")
+          OTHER=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s" --grep -vE "^(feat|fix|docs|chore|ci|refactor|test|style)" 2>/dev/null || echo "")
+
+          # Build changelog
+          CHANGELOG="## What's Changed in $NEW_VERSION\n\n"
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG+="### 🚀 Features\n$FEATURES\n\n"
+          fi
+          if [ -n "$FIXES" ]; then
+            CHANGELOG+="### 🐛 Bug Fixes\n$FIXES\n\n"
+          fi
+          if [ -n "$DOCS" ]; then
+            CHANGELOG+="### 📚 Documentation\n$DOCS\n\n"
+          fi
+          if [ -n "$OTHER" ]; then
+            CHANGELOG+="### 🔧 Other Changes\n$OTHER\n\n"
+          fi
+
+          CHANGELOG+="**Full diff:** https://github.com/${{ github.repository }}/compare/$LAST_TAG...$NEW_VERSION"
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+          git push origin "$NEW_VERSION"
+          echo "🏷️ Tagged: $NEW_VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.new_version }}
+          name: ${{ steps.version.outputs.new_version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+
+      - name: Comment on recent PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const newVersion = '${{ steps.version.outputs.new_version }}';
+            const changelog = `${{ steps.changelog.outputs.changelog }}`;
+
+            // Find PRs merged since last tag
+            const lastTag = '${{ steps.version.outputs.last_tag }}';
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 20,
+            });
+
+            const mergedPrs = prs.filter(pr =>
+              pr.merged_at &&
+              new Date(pr.merged_at) > new Date('${{ steps.version.outputs.last_tag }}'.created_at || '2024-01-01')
+            );
+
+            for (const pr of mergedPrs.slice(0, 5)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `🎉 **Released in ${newVersion}!**\n\nThis PR is included in the latest release. [View Release](https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${newVersion})`,
+              });
+            }
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Release Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ steps.version.outputs.new_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Previous** | ${{ steps.version.outputs.last_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Bump** | ${{ steps.version.outputs.bump }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Release** | [View on GitHub](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.new_version }}) |" >> $GITHUB_STEP_SUMMARY
