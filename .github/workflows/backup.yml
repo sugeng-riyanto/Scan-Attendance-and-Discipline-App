@@ -1,0 +1,161 @@
+name: Weekly Database Backup
+
+on:
+  schedule:
+    # Every Sunday at 02:00 UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual backup'
+        required: false
+        default: 'Manual backup'
+
+jobs:
+  backup:
+    name: Export Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Generate backup filename
+        id: filename
+        run: |
+          DATE=$(date +%Y-%m-%d_%H-%M)
+          FILENAME="backup_${DATE}.sql.gz"
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "📦 Backup file: $FILENAME"
+
+      - name: Export database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "🔄 Starting database export..."
+
+          # Parse connection string
+          # Format: postgresql://user:pass@host:port/dbname?sslmode=require
+          DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):\([^/]*\)/.*|\1|p')
+          DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):\([^/]*\)/.*|\2|p')
+          DB_NAME=$(echo "$DATABASE_URL" | sed -n 's|.*/\([^?]*\).*|\1|p')
+          DB_USER=$(echo "$DATABASE_URL" | sed -n 's|.*://\([^:]*\):.*|\1|p')
+          DB_PASS=$(echo "$DATABASE_URL" | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
+
+          echo "Host: $DB_HOST"
+          echo "Port: $DB_PORT"
+          echo "Database: $DB_NAME"
+          echo "User: $DB_USER"
+
+          # Export and compress
+          PGPASSWORD="$DB_PASS" pg_dump \
+            -h "$DB_HOST" \
+            -p "$DB_PORT" \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            --no-owner \
+            --no-acl \
+            --clean \
+            --if-exists \
+            -F p \
+            | gzip > "${{ steps.filename.outputs.filename }}"
+
+          # Show file size
+          ls -lh "${{ steps.filename.outputs.filename }}"
+
+          echo "✅ Export complete"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ steps.filename.outputs.date }}
+          path: ${{ steps.filename.outputs.filename }}
+          retention-days: 90
+          compression-level: 0
+
+      - name: Create GitHub Release (monthly)
+        if: contains(github.event.schedule, '0 2 * * 0')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: backup-${{ steps.filename.outputs.date }}
+          name: Database Backup ${{ steps.filename.outputs.date }}
+          body: |
+            ## Weekly Database Backup
+
+            **Date:** ${{ steps.filename.outputs.date }}
+            **File:** ${{ steps.filename.outputs.filename }}
+
+            ### How to restore:
+            ```bash
+            # Decompress
+            gunzip -k ${{ steps.filename.outputs.filename }}
+
+            # Restore to database
+            PGPASSWORD=your_password pg_restore \
+              -h your_host \
+              -p 5432 \
+              -U your_user \
+              -d your_database \
+              --clean \
+              --if-exists \
+              --no-owner \
+              --no-acl \
+              ${{ steps.filename.outputs.filename }}
+            ```
+
+            ### Manual restore via psql:
+            ```bash
+            gunzip -k ${{ steps.filename.outputs.filename }}
+            psql -h your_host -U your_user -d your_database < ${{ steps.filename.outputs.filename }}
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+
+            const backups = artifacts.data.artifacts
+              .filter(a => a.name.startsWith('db-backup-'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            // Keep only last 12 weekly backups (3 months)
+            const toDelete = backups.slice(12);
+
+            for (const backup of toDelete) {
+              console.log(`Deleting old backup: ${backup.name}`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: backup.id,
+              });
+            }
+
+            console.log(`Kept ${Math.min(backups.length, 12)} backups, deleted ${toDelete.length}`);
+
+      - name: Summary
+        run: |
+          echo "## 🗄️ Database Backup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Date** | ${{ steps.filename.outputs.date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **File** | ${{ steps.filename.outputs.filename }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Size** | $(ls -lh ${{ steps.filename.outputs.filename }} | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Retention** | 90 days (artifacts) / 3 months (releases) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Schedule** | Every Sunday at 02:00 UTC |" >> $GITHUB_STEP_SUMMARY
