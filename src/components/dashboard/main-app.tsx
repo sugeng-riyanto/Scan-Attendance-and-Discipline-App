@@ -37,6 +37,7 @@ import { TermsPage } from './terms-page'
 import { GuidePage } from './guide-page'
 import { AuditLogsPage } from './audit-logs-page'
 import { SecurityPage } from './security-page'
+import { DataRightsPage } from './data-rights-page'
 import { SuperAdminPage } from './super-admin-page'
 import DutyScheduleManager from './duty-schedule-manager'
 import { DutyScheduleWidget } from './duty-schedule-widget'
@@ -123,6 +124,9 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
       case 'guide': return <GuidePage user={user} />
       case 'audit-logs':
         if (user.role === 'ADMIN' || user.role === 'KEPALA_SEKOLAH') return <AuditLogsPage />
+        return <AdminDashboard />
+      case 'data-rights':
+        if (user.role === 'ADMIN' || user.role === 'KEPALA_SEKOLAH') return <DataRightsPage />
         return <AdminDashboard />
       case 'security':
         if (user.role === 'ADMIN' || user.role === 'KEPALA_SEKOLAH') return <SecurityPage />

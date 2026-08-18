@@ -28,6 +28,7 @@ export type AppPage =
   | 'terms'
   | 'guide'
   | 'audit-logs'
+  | 'data-rights'
   | 'security'
   | 'super-admin';
 

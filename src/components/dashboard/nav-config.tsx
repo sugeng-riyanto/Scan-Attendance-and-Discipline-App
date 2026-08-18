@@ -27,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: <Settings className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU','GURU_JAGA','ORANG_TUA','SISWA'] },
   { id: 'face-capture', label: 'Face Registration', icon: <Camera className="h-5 w-5" />, roles: ['ADMIN'] },
   { id: 'audit-logs', label: 'Activity Log', icon: <LogsIcon className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH'] },
+  { id: 'data-rights', label: 'Data Rights', icon: <FileText className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH'] },
   { id: 'security', label: 'Data Security', icon: <ShieldAlert className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH'] },
   { id: 'school-documents', label: 'Document Library', icon: <FileText className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU','GURU_JAGA','ORANG_TUA','SISWA'] },
   { id: 'guide', label: 'User Guide', icon: <BookOpen className="h-5 w-5" />, roles: ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU','GURU_JAGA','ORANG_TUA','SISWA'] },
