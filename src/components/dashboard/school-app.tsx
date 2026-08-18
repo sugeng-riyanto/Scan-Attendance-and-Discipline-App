@@ -36,7 +36,7 @@ export default function SchoolApp({ initialSchoolCode }: { initialSchoolCode?: s
   // without this the login screen's toasts (T&C gate, login errors, setup
   // feedback) would be silent no-ops.
   return (
-    <div style={{ ['--theme-color' as string]: themeColor }}>
+    <div style={{ ['--theme-color' as string]: themeColor }} suppressHydrationWarning>
       {isAuthenticated ? (
         <MainApp schoolConfig={brandedConfig} themeColor={themeColor} />
       ) : (
