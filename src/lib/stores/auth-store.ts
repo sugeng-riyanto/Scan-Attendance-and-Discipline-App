@@ -17,6 +17,7 @@ export interface AuthUser {
   role: string;
   avatar?: string;
   termsAccepted?: boolean;
+  termsAcceptedVersion?: number | null;
   school?: SchoolBranding | null;
 }
 

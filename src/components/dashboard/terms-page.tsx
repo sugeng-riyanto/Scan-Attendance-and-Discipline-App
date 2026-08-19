@@ -1,14 +1,14 @@
 'use client'
 
 import React, { useEffect, useState, useMemo } from 'react'
-import { AuthUser } from '@/lib/stores/auth-store'
+import { AuthUser, useAuthStore } from '@/lib/stores/auth-store'
 import { roleLabels } from '@/lib/attendance-utils'
 import { apiFetch } from '@/lib/api-fetch'
 import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
 import { toast } from 'sonner'
 import {
   ScrollText, ShieldCheck, FileText,
-  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight
+  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight, RefreshCw
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -381,6 +381,15 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
         {renderBody(body)}
       </div>
 
+      {/* Non-admin acceptance button */}
+      {!canEdit && terms && (
+        <TermsAcceptButton
+          currentVersion={terms.version}
+          userVersion={(user as any).termsAcceptedVersion ?? null}
+          themeColor={user?.school?.themeColor || '#10b981'}
+        />
+      )}
+
       {/* Admin version management footer */}
       {canEdit && (
         <>
@@ -567,4 +576,53 @@ function DiffLineView({ line }: { line: DiffLine }) {
     return <div className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2">+ {line.text}</div>
   }
   return <div className="bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2">- {line.text}</div>
+}
+
+/**
+ * Acceptance button shown to non-admin users when the displayed T&C version
+ * is newer than the one they last accepted.  Clicking it calls the auth API
+ * with acceptedTerms=true which records the acceptance server-side.
+ */
+function TermsAcceptButton({
+  currentVersion, userVersion, themeColor
+}: {
+  currentVersion: number; userVersion: number | null; themeColor: string
+}) {
+  const isUpToDate = userVersion !== null && userVersion >= currentVersion
+  const [busy, setBusy] = React.useState(false)
+  const [done, setDone] = React.useState(isUpToDate)
+
+  if (done) {
+    return (
+      <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center text-sm text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
+        <CheckCircle className="h-4 w-4 inline mr-1" /> Anda telah menyetujui Syarat & Ketentuan v{currentVersion}.
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-center dark:border-amber-700 dark:bg-amber-950/30">
+      <p className="text-sm text-amber-800 dark:text-amber-200 mb-2">
+        Syarat & Ketentuan v{currentVersion} belum Anda setujui.
+        {userVersion !== null && <span className="text-xs block mt-1">Anda terakhir menyetujui v{userVersion}.</span>}
+      </p>
+      <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={async () => {
+        setBusy(true)
+        try {
+          await apiFetch<{ success: boolean; termsAcceptedVersion: number }>('/api/terms-accept', {
+            method: 'POST',
+          })
+          useAuthStore.getState().updateUser({ termsAcceptedVersion: currentVersion } as any)
+          setDone(true)
+          toast.success(`Syarat & Ketentuan v${currentVersion} telah disetujui.`)
+        } catch {
+          toast.error('Gagal mencatat persetujuan. Silakan coba lagi.')
+        } finally {
+          setBusy(false)
+        }
+      }} disabled={busy}>
+        {busy ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />} Saya Setujui Syarat & Ketentuan v{currentVersion}
+      </Button>
+    </div>
+  )
 }

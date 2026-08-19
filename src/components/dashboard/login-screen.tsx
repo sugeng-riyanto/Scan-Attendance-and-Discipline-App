@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
-import { GraduationCap, Lock, RefreshCw, Database, QrCode, ClipboardList, Search } from 'lucide-react'
+import { GraduationCap, Lock, RefreshCw, Database, QrCode, ClipboardList, Search, CheckCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { SchoolLandingProfile } from '@/components/dashboard/school-landing-profile'
 import { toast } from 'sonner'
@@ -94,6 +94,13 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
   const [pin, setPin] = useState('')
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [loading, setLoading] = useState(false)
+  // T&C re-acceptance: when the server says terms were updated since last
+  // acceptance, we show the T&C content inline so the user can re-accept.
+  const [reAcceptTerms, setReAcceptTerms] = useState<{
+    version: number; title: string; body: string
+  } | null>(null)
+  const [reAcceptChecked, setReAcceptChecked] = useState(false)
+  const [reAcceptLoading, setReAcceptLoading] = useState(false)
   const [setupLoading, setSetupLoading] = useState(false)
   const [setupDone, setSetupDone] = useState(false)
   const [demoConfig, setDemoConfig] = useState<Record<string, boolean>>({})
@@ -235,8 +242,8 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
       const res = await apiFetch<{ user: AuthUser; message: string }>('/api/auth', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pinMode
-          ? { username: un, pin, acceptedTerms: true }
-          : { username: un, password: pw, acceptedTerms: true })
+          ? { username: un, pin, acceptedTerms: termsAccepted }
+          : { username: un, password: pw, acceptedTerms: termsAccepted })
       })
       login(res.user)
       useAppStore.getState().setActivePage('dashboard')
@@ -244,17 +251,61 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
       // A fresh login never starts inside a stale school preview.
       usePreviewStore.getState().clearPreview()
       if (initialSchoolCode) {
-        // The /s/:code landing page lives outside the dashboard shell; hop to
-        // "/" so the authenticated app renders (the dashboard is client-gated
-        // and reads the session from the auth store).
         window.location.assign('/')
       } else {
         toast.success(`Selamat datang, ${res.user.name}!`)
       }
     } catch (err: any) {
-      toast.error(err.message || 'Login gagal')
+      // If the server says T&C were updated, fetch the latest version and
+      // show it inline so the user can re-accept before proceeding.
+      const msg = err.message || ''
+      if (msg.includes('Terms & Conditions have been updated') || msg.includes('termsUpdated')) {
+        try {
+          const data = await apiFetch<{ terms: { title: string; body: string; version: number } }>('/api/terms-content')
+          if (data?.terms) {
+            setReAcceptTerms(data.terms)
+            setReAcceptChecked(false)
+            setTermsAccepted(false)
+          } else {
+            // No T&C content found — auto-accept by retrying
+            setTermsAccepted(true)
+            await handleLogin(u, p)
+          }
+        } catch { toast.error('Gagal memuat Syarat dan Ketentuan') }
+      } else {
+        toast.error(msg || 'Login gagal')
+      }
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Retry login after the user has checked the re-acceptance box.
+  const handleReAcceptLogin = async () => {
+    if (!reAcceptChecked) {
+      toast.error('Anda harus menyetujui Syarat dan Ketentuan terlebih dahulu')
+      return
+    }
+    setReAcceptLoading(true)
+    try {
+      const un = username
+      const pw = password
+      const res = await apiFetch<{ user: AuthUser; message: string }>('/api/auth', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pinMode
+          ? { username: un, pin, acceptedTerms: true }
+          : { username: un, password: pw, acceptedTerms: true })
+      })
+      setReAcceptTerms(null)
+      login(res.user)
+      useAppStore.getState().setActivePage('dashboard')
+      useAppStore.getState().setClassFilter('all')
+      usePreviewStore.getState().clearPreview()
+      toast.success(`Selamat datang, ${res.user.name}! Syarat & Ketentuan v${reAcceptTerms?.version} telah disetujui.`)
+    } catch (err: any) {
+      toast.error(err.message || 'Login gagal')
+    } finally {
+      setReAcceptLoading(false)
     }
   }
 
@@ -407,6 +458,37 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
             </button>
           </CardHeader>
         <CardContent className="space-y-4">
+          {/* T&C Re-acceptance: server says terms updated since last accept */}
+          {reAcceptTerms && (
+            <div className="space-y-4 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                Syarat & Ketentuan telah diperbarui (v{reAcceptTerms.version}).
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Silakan baca versi terbaru di bawah dan centang untuk menyetujui sebelum melanjutkan.
+              </p>
+              <div className="max-h-60 overflow-y-auto rounded border bg-white p-3 text-xs leading-relaxed dark:bg-gray-900">
+                <p className="font-bold mb-2">{reAcceptTerms.title}</p>
+                <pre className="whitespace-pre-wrap font-sans">{reAcceptTerms.body}</pre>
+              </div>
+              <div className="flex items-start gap-2">
+                <Checkbox id="reaccept" checked={reAcceptChecked} onCheckedChange={v => setReAcceptChecked(v === true)} className="mt-0.5" />
+                <label htmlFor="reaccept" className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed cursor-pointer select-none">
+                  Saya telah membaca dan menyetujui Syarat dan Ketentuan versi {reAcceptTerms.version}.
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" className="text-white" style={{ backgroundColor: displayTheme }} onClick={handleReAcceptLogin} disabled={reAcceptLoading}>
+                  {reAcceptLoading ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />} Setujui & Masuk
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setReAcceptTerms(null); setReAcceptChecked(false) }}>
+                  Kembali
+                </Button>
+              </div>
+            </div>
+          )}
+          {!reAcceptTerms && (
+          <>
           <div className="space-y-2">
             <Label htmlFor="username">Username</Label>
             <Input id="username" value={username} onChange={e => setUsername(e.target.value)}
@@ -477,6 +559,8 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
           <div className="pt-4 text-center">
             <p className="text-xs text-gray-400 dark:text-gray-500">&copy; {new Date().getFullYear()} {displayName || 'Sekolah'}. All rights reserved.</p>
           </div>
+          </>
+          )}
         </CardContent>
         </Card>
       </div>

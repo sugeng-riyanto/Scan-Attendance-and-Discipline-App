@@ -44,6 +44,7 @@ import { DutyScheduleWidget } from './duty-schedule-widget'
 import { ErrorBoundary } from './error-boundary'
 import { SubscriptionBanner } from './subscription-banner'
 import { PreviewBanner } from './preview-banner'
+import { TermsReAcceptBanner } from './terms-re-accept-banner'
 
 export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConfigType; themeColor: string }) {
   const { user } = useAuthStore()
@@ -148,6 +149,7 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
         <HeaderBar schoolConfig={schoolConfig} themeColor={themeColor} />
         {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'KEPALA_SEKOLAH') && <SubscriptionBanner />}
         <PreviewBanner />
+        <TermsReAcceptBanner themeColor={themeColor} />
         <main className="p-4 pb-20 lg:pb-4 min-h-[calc(100vh-3.5rem)]">
           <ErrorBoundary key={activePage}>
             {renderPage()}
