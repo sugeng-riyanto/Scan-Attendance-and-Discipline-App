@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/api-fetch'
 import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
 import { toast } from 'sonner'
 import {
-  ScrollText, ShieldCheck, FileText,
+  ScrollText, ShieldCheck, FileText, FileSpreadsheet,
   Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight, RefreshCw, Bell, Clock
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -635,6 +635,62 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                   }}
                 >
                   Reset All
+                </Button>
+              </div>
+
+              {/* Export CSV/XLSX buttons */}
+              <div className="flex gap-2 mt-2">
+                <Button
+                  size="sm" variant="outline"
+                  className="flex-1 border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  onClick={() => {
+                    if (!acceptance?.users?.length) return
+                    const header = ['Name','Username','Role','Accepted Version','Accepted Date','Status']
+                    const rows = acceptance.users.map(u => [
+                      u.name, u.username, roleLabels[u.role] || u.role,
+                      u.acceptedVersion !== null ? `v${u.acceptedVersion}` : '',
+                      u.acceptedAt ? new Date(u.acceptedAt).toLocaleDateString() : '',
+                      u.isUpToDate ? 'Up to date' : 'Needs re-acceptance',
+                    ])
+                    const csv = '\uFEFF' + [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `tc_acceptance_v${acceptance.currentVersion}_${new Date().toISOString().split('T')[0]}.csv`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                    toast.success(`CSV exported (${acceptance.users.length} rows)`)
+                  }}
+                >
+                  <FileText className="h-3 w-3 mr-1" /> Export CSV
+                </Button>
+                <Button
+                  size="sm" variant="outline"
+                  className="flex-1 border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  onClick={async () => {
+                    if (!acceptance?.users?.length) return
+                    try {
+                      const XLSX = await import('xlsx')
+                      const data = acceptance.users.map(u => ({
+                        Name: u.name,
+                        Username: u.username,
+                        Role: roleLabels[u.role] || u.role,
+                        'Accepted Version': u.acceptedVersion !== null ? `v${u.acceptedVersion}` : '',
+                        'Accepted Date': u.acceptedAt ? new Date(u.acceptedAt).toLocaleDateString() : '',
+                        Status: u.isUpToDate ? 'Up to date' : 'Needs re-acceptance',
+                      }))
+                      const ws = XLSX.utils.json_to_sheet(data)
+                      const wb = XLSX.utils.book_new()
+                      XLSX.utils.book_append_sheet(wb, ws, `T&C v${acceptance.currentVersion}`)
+                      XLSX.writeFile(wb, `tc_acceptance_v${acceptance.currentVersion}_${new Date().toISOString().split('T')[0]}.xlsx`)
+                      toast.success(`XLSX exported (${acceptance.users.length} rows)`)
+                    } catch {
+                      toast.error('Failed to generate XLSX')
+                    }
+                  }}
+                >
+                  <FileSpreadsheet className="h-3 w-3 mr-1" /> Export XLSX
                 </Button>
               </div>
               </>
