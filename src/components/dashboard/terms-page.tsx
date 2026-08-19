@@ -387,6 +387,7 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
           currentVersion={terms.version}
           userVersion={(user as any).termsAcceptedVersion ?? null}
           themeColor={user?.school?.themeColor || '#10b981'}
+          publishedAt={terms.createdAt}
         />
       )}
 
@@ -607,13 +608,22 @@ function DiffLineView({ line }: { line: DiffLine }) {
  * with acceptedTerms=true which records the acceptance server-side.
  */
 function TermsAcceptButton({
-  currentVersion, userVersion, themeColor
+  currentVersion, userVersion, themeColor, publishedAt
 }: {
-  currentVersion: number; userVersion: number | null; themeColor: string
+  currentVersion: number; userVersion: number | null; themeColor: string; publishedAt?: string
 }) {
   const isUpToDate = userVersion !== null && userVersion >= currentVersion
   const [busy, setBusy] = React.useState(false)
   const [done, setDone] = React.useState(isUpToDate)
+
+  // Calculate days remaining until 30-day deadline
+  const daysRemaining = React.useMemo(() => {
+    if (!publishedAt) return null
+    const pub = new Date(publishedAt)
+    const deadline = new Date(pub)
+    deadline.setDate(deadline.getDate() + 30)
+    return Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+  }, [publishedAt])
 
   if (done) {
     return (
@@ -623,11 +633,27 @@ function TermsAcceptButton({
     )
   }
 
+  const isLocked = daysRemaining !== null && daysRemaining <= 0
+  const isUrgent = daysRemaining !== null && daysRemaining > 0 && daysRemaining <= 7
+  const borderClass = isLocked ? 'border-red-400 dark:border-red-600' : isUrgent ? 'border-red-300 dark:border-red-700' : 'border-amber-300 dark:border-amber-700'
+  const bgClass = isLocked ? 'bg-red-50 dark:bg-red-950/30' : isUrgent ? 'bg-red-50 dark:bg-red-950/20' : 'bg-amber-50 dark:bg-amber-950/30'
+  const textClass = isLocked ? 'text-red-800 dark:text-red-200' : isUrgent ? 'text-red-700 dark:text-red-300' : 'text-amber-800 dark:text-amber-200'
+
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-center dark:border-amber-700 dark:bg-amber-950/30">
-      <p className="text-sm text-amber-800 dark:text-amber-200 mb-2">
+    <div className={`rounded-lg border ${borderClass} ${bgClass} p-4 text-center`}>
+      <p className={`text-sm ${textClass} mb-2`}>
         Syarat & Ketentuan v{currentVersion} belum Anda setujui.
         {userVersion !== null && <span className="text-xs block mt-1">Anda terakhir menyetujui v{userVersion}.</span>}
+        {daysRemaining !== null && !isLocked && (
+          <span className="text-xs block mt-1 font-medium">
+            Sisa waktu: {daysRemaining} hari (deadline: {new Date(new Date(publishedAt!).getTime() + 30 * 86400000).toLocaleDateString('id-ID')})
+          </span>
+        )}
+        {isLocked && (
+          <span className="text-xs block mt-1 font-bold">
+            ⚠️ Batas waktu telah habis! Hubungi administrator untuk mengaktifkan kembali akun Anda.
+          </span>
+        )}
       </p>
       <Button size="sm" className="text-white" style={{ backgroundColor: themeColor }} onClick={async () => {
         setBusy(true)

@@ -46,13 +46,30 @@ export async function POST(request: NextRequest) {
     let termsAcceptedAt = user.termsAcceptedAt;
     let termsAcceptedVersion = user.termsAcceptedVersion;
 
-    // Fetch the current active T&C version number
+    // Fetch the current active T&C version + publication date for deadline calc
     const activeTerms = await db.termsContent.findFirst({
       where: { isActive: true },
       orderBy: { version: 'desc' },
-      select: { version: true },
+      select: { version: true, createdAt: true },
     });
     const currentVersion = activeTerms?.version ?? 0;
+
+    // 30-day enforcement deadline: if the T&C was published more than 30 days
+    // ago and the user still hasn't accepted, their account is locked until
+    // an admin publishes a new version (resetting the deadline) or the user
+    // contacts support.
+    const TERMS_DEADLINE_DAYS = 30;
+    let daysUntilDeadline: number | null = null;
+    let deadlineLocked = false;
+
+    if (activeTerms?.createdAt) {
+      const publishedAt = new Date(activeTerms.createdAt);
+      const deadline = new Date(publishedAt);
+      deadline.setDate(deadline.getDate() + TERMS_DEADLINE_DAYS);
+      const now = new Date();
+      daysUntilDeadline = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      deadlineLocked = now > deadline;
+    }
 
     // Determine if re-acceptance is needed
     const needsReAcceptance = currentVersion > 0 && (
@@ -62,6 +79,19 @@ export async function POST(request: NextRequest) {
     );
 
     if (needsReAcceptance) {
+      // HARD BLOCK: 30-day deadline exceeded — even acceptedTerms=true won't help
+      if (deadlineLocked) {
+        await logAudit({
+          action: 'LOGIN_BLOCKED_TERMS_DEADLINE', category: 'AUTH', severity: 'WARNING',
+          userId: user.id, username: user.username, role: user.role, ip,
+          details: `Login ditolak: batas waktu 30 hari penerimaan Syarat & Ketentuan v${currentVersion} telah habis`,
+        });
+        return NextResponse.json({
+          error: `Anda belum menyetujui Syarat & Ketentuan v${currentVersion} dalam waktu 30 hari sejak diterbitkan. Akun Anda terkunci. Silakan hubungi administrator sekolah untuk mengaktifkan kembali akun Anda.`,
+          termsDeadlineLocked: true, currentVersion, daysUntilDeadline: 0,
+        }, { status: 403 });
+      }
+
       if (acceptedTerms === true) {
         termsAcceptedAt = new Date();
         termsAcceptedVersion = currentVersion;
@@ -72,7 +102,7 @@ export async function POST(request: NextRequest) {
       } else {
         return NextResponse.json(
           { error: 'Terms & Conditions have been updated. Please accept the latest version before logging in.',
-            termsUpdated: true, currentVersion },
+            termsUpdated: true, currentVersion, daysUntilDeadline },
           { status: 403 }
         );
       }

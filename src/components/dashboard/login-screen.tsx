@@ -97,7 +97,7 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
   // T&C re-acceptance: when the server says terms were updated since last
   // acceptance, we show the T&C content inline so the user can re-accept.
   const [reAcceptTerms, setReAcceptTerms] = useState<{
-    version: number; title: string; body: string
+    version: number; title: string; body: string; createdAt: string
   } | null>(null)
   const [reAcceptChecked, setReAcceptChecked] = useState(false)
   const [reAcceptLoading, setReAcceptLoading] = useState(false)
@@ -259,15 +259,17 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
       // If the server says T&C were updated, fetch the latest version and
       // show it inline so the user can re-accept before proceeding.
       const msg = err.message || ''
-      if (msg.includes('Terms & Conditions have been updated') || msg.includes('termsUpdated')) {
+      if (msg.includes('termsDeadlineLocked')) {
+        // 30-day deadline exceeded — account is locked, cannot proceed
+        toast.error(msg, { duration: 15000 })
+      } else if (msg.includes('Terms & Conditions have been updated') || msg.includes('termsUpdated')) {
         try {
-          const data = await apiFetch<{ terms: { title: string; body: string; version: number } }>('/api/terms-content')
+          const data = await apiFetch<{ terms: { title: string; body: string; version: number; createdAt: string } }>('/api/terms-content')
           if (data?.terms) {
             setReAcceptTerms(data.terms)
             setReAcceptChecked(false)
             setTermsAccepted(false)
           } else {
-            // No T&C content found — auto-accept by retrying
             setTermsAccepted(true)
             await handleLogin(u, p)
           }
@@ -459,13 +461,28 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
           </CardHeader>
         <CardContent className="space-y-4">
           {/* T&C Re-acceptance: server says terms updated since last accept */}
-          {reAcceptTerms && (
-            <div className="space-y-4 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
-              <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                Syarat & Ketentuan telah diperbarui (v{reAcceptTerms.version}).
+          {reAcceptTerms && (() => {
+            const pub = new Date(reAcceptTerms.createdAt)
+            const deadline = new Date(pub)
+            deadline.setDate(deadline.getDate() + 30)
+            const daysLeft = Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+            const isLocked = daysLeft <= 0
+            const isUrgent = daysLeft > 0 && daysLeft <= 7
+            const borderColor = isLocked ? 'border-red-400 dark:border-red-600' : isUrgent ? 'border-red-300 dark:border-red-700' : 'border-amber-300 dark:border-amber-700'
+            const bgColor = isLocked ? 'bg-red-50 dark:bg-red-950/30' : isUrgent ? 'bg-red-50 dark:bg-red-950/20' : 'bg-amber-50 dark:bg-amber-950/30'
+            const titleColor = isLocked ? 'text-red-800 dark:text-red-200' : isUrgent ? 'text-red-700 dark:text-red-300' : 'text-amber-800 dark:text-amber-200'
+            const subColor = isLocked ? 'text-red-700 dark:text-red-300' : isUrgent ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-300'
+            return (
+            <div className={`space-y-4 rounded-lg border ${borderColor} ${bgColor} p-4`}>
+              <p className={`text-sm font-semibold ${titleColor}`}>
+                {isLocked ? '⚠️ Batas waktu telah habis!' : 'Syarat & Ketentuan telah diperbarui'} (v{reAcceptTerms.version}).
               </p>
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                Silakan baca versi terbaru di bawah dan centang untuk menyetujui sebelum melanjutkan.
+              <p className={`text-xs ${subColor}`}>
+                {isLocked
+                  ? 'Akun Anda terkunci karena belum menyetujui versi terbaru dalam 30 hari. Silakan hubungi administrator.'
+                  : isUrgent
+                    ? `Sisa waktu ${daysLeft} hari — segera setujui! Deadline: ${deadline.toLocaleDateString('id-ID')}`
+                    : `Silakan baca versi terbaru di bawah dan centang untuk menyetujui. Sisa waktu: ${daysLeft} hari.`}
               </p>
               <div className="max-h-60 overflow-y-auto rounded border bg-white p-3 text-xs leading-relaxed dark:bg-gray-900">
                 <p className="font-bold mb-2">{reAcceptTerms.title}</p>
@@ -486,7 +503,7 @@ export function LoginScreen({ schoolConfig, themeColor, initialSchoolCode }: { s
                 </Button>
               </div>
             </div>
-          )}
+            )})()}
           {!reAcceptTerms && (
           <>
           <div className="space-y-2">
