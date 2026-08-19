@@ -40,16 +40,39 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Syarat & Ketentuan: pengguna yang belum menyetujui tidak boleh login
-    // sampai kotak centang persetujuan dicentang (acceptance dicatat per pengguna).
+    // Syarat & Ketentuan: pengguna yang belum menyetujui tidak boleh login.
+    // If the T&C has been updated since the user last accepted, they must
+    // re-accept the latest version before logging in.
     let termsAcceptedAt = user.termsAcceptedAt;
-    if (!termsAcceptedAt) {
+    let termsAcceptedVersion = user.termsAcceptedVersion;
+
+    // Fetch the current active T&C version number
+    const activeTerms = await db.termsContent.findFirst({
+      where: { isActive: true },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const currentVersion = activeTerms?.version ?? 0;
+
+    // Determine if re-acceptance is needed
+    const needsReAcceptance = currentVersion > 0 && (
+      !termsAcceptedAt ||
+      termsAcceptedVersion === null ||
+      termsAcceptedVersion < currentVersion
+    );
+
+    if (needsReAcceptance) {
       if (acceptedTerms === true) {
         termsAcceptedAt = new Date();
-        await db.user.update({ where: { id: user.id }, data: { termsAcceptedAt } });
+        termsAcceptedVersion = currentVersion;
+        await db.user.update({
+          where: { id: user.id },
+          data: { termsAcceptedAt, termsAcceptedVersion },
+        });
       } else {
         return NextResponse.json(
-          { error: 'Anda harus menyetujui Syarat dan Ketentuan terlebih dahulu sebelum login' },
+          { error: 'Terms & Conditions have been updated. Please accept the latest version before logging in.',
+            termsUpdated: true, currentVersion },
           { status: 403 }
         );
       }
@@ -78,6 +101,7 @@ export async function POST(request: NextRequest) {
         role: user.role,
         avatar: user.avatar,
         termsAccepted: !!termsAcceptedAt,
+        termsAcceptedVersion,
         school: school
           ? { id: school.id, code: school.code, name: school.name, address: school.address, logo: school.logo, themeColor: school.themeColor }
           : null,

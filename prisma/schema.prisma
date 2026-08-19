@@ -103,6 +103,7 @@ model User {
   avatar          String?
   isActive        Boolean  @default(true)
   termsAcceptedAt DateTime?
+  termsAcceptedVersion Int?    // T&C version the user last accepted (re-accept on new version)
   email           String?
   // Account security & reminders (per-role Pengaturan Akun)
   pinHash        String?  // hashed PIN for quick unlock (login cepat)

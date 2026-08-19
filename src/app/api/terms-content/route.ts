@@ -30,6 +30,54 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ versions: all });
     }
 
+    const wantAcceptance = searchParams.get('acceptance') === 'true';
+    if (wantAcceptance) {
+      // Admin-only: return per-user acceptance status for the current active version
+      const auth = getAuthUser(request);
+      if (!auth || !requireRole(auth.role, EDIT_ROLES)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+
+      const activeTerms = await db.termsContent.findFirst({
+        where: { isActive: true },
+        orderBy: { version: 'desc' },
+        select: { version: true, updatedAt: true },
+      });
+      const currentVersion = activeTerms?.version ?? 0;
+
+      // Build where clause: same-school users only (unless super admin without school scope)
+      const where: any = { isActive: true };
+      if (auth.role !== 'SUPER_ADMIN' && (auth as any).schoolId) {
+        where.schoolId = (auth as any).schoolId;
+      }
+
+      const users = await db.user.findMany({
+        where,
+        select: {
+          id: true, name: true, username: true, role: true, schoolId: true,
+          termsAcceptedAt: true, termsAcceptedVersion: true,
+        },
+        orderBy: { name: 'asc' },
+      });
+
+      const accepted = users.filter(u => u.termsAcceptedVersion !== null && u.termsAcceptedVersion >= currentVersion);
+      const pending = users.filter(u => u.termsAcceptedVersion === null || u.termsAcceptedVersion < currentVersion);
+
+      return NextResponse.json({
+        currentVersion,
+        updatedAt: activeTerms?.updatedAt ?? null,
+        total: users.length,
+        accepted: accepted.length,
+        pending: pending.length,
+        users: users.map(u => ({
+          id: u.id, name: u.name, username: u.username, role: u.role,
+          acceptedVersion: u.termsAcceptedVersion,
+          acceptedAt: u.termsAcceptedAt,
+          isUpToDate: u.termsAcceptedVersion !== null && u.termsAcceptedVersion >= currentVersion,
+        })),
+      });
+    }
+
     // Default: return the active version (or latest if none active)
     const terms = await db.termsContent.findFirst({
       where: { isActive: true },

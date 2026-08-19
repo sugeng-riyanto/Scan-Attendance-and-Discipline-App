@@ -13,8 +13,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 
 interface TermsRecord {
@@ -174,6 +174,38 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
       return next
     })
   }
+
+  // Acceptance tracking
+  interface AcceptanceUser {
+    id: string; name: string; username: string; role: string
+    acceptedVersion: number | null; acceptedAt: string | null; isUpToDate: boolean
+  }
+  const [acceptance, setAcceptance] = useState<{
+    currentVersion: number; total: number; accepted: number; pending: number; users: AcceptanceUser[]
+  } | null>(null)
+  const [acceptanceLoading, setAcceptanceLoading] = useState(false)
+  const [showAcceptance, setShowAcceptance] = useState(false)
+  const [filterAccepted, setFilterAccepted] = useState<'all' | 'accepted' | 'pending'>('all')
+
+  const loadAcceptance = async () => {
+    if (showAcceptance) { setShowAcceptance(false); return }
+    setAcceptanceLoading(true)
+    try {
+      const data = await apiFetch<any>('/api/terms-content?acceptance=true')
+      setAcceptance(data)
+      setShowAcceptance(true)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load acceptance data')
+    } finally {
+      setAcceptanceLoading(false)
+    }
+  }
+
+  const filteredUsers = acceptance?.users.filter(u => {
+    if (filterAccepted === 'accepted') return u.isUpToDate
+    if (filterAccepted === 'pending') return !u.isUpToDate
+    return true
+  }) || []
 
   const saveTerms = async (activate = true) => {
     if (!editBody.trim() || editBody.trim().length < 10) {
@@ -361,6 +393,9 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
               <Button variant="ghost" size="sm" className="text-xs h-7" onClick={loadHistory} disabled={historyLoading}>
                 <History className="h-3 w-3 mr-1" /> {showHistory ? 'Hide History' : 'Version History'}
               </Button>
+              <Button variant="ghost" size="sm" className="text-xs h-7" onClick={loadAcceptance} disabled={acceptanceLoading}>
+                <CheckCircle className="h-3 w-3 mr-1" /> {showAcceptance ? 'Hide Acceptance' : 'Acceptance'}
+              </Button>
               {terms && (
                 <Button variant="ghost" size="sm" className="text-xs h-7" onClick={deleteTerms} disabled={busy}>
                   <Trash2 className="h-3 w-3 mr-1" /> Delete Version
@@ -424,6 +459,95 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                 </div>
               )
             })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Acceptance Tracking Panel (admin only) */}
+      {canEdit && showAcceptance && acceptance && (
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <CheckCircle className="h-4 w-4" /> T&C Acceptance — v{acceptance.currentVersion}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border p-2">
+                <p className="text-lg font-bold">{acceptance.total}</p>
+                <p className="text-xs text-muted-foreground">Total Users</p>
+              </div>
+              <div className="rounded-lg border border-green-200 bg-green-50 p-2 dark:border-green-800 dark:bg-green-950/30">
+                <p className="text-lg font-bold text-green-700 dark:text-green-400">{acceptance.accepted}</p>
+                <p className="text-xs text-green-600 dark:text-green-500">Accepted</p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800 dark:bg-amber-950/30">
+                <p className="text-lg font-bold text-amber-700 dark:text-amber-400">{acceptance.pending}</p>
+                <p className="text-xs text-amber-600 dark:text-amber-500">Pending</p>
+              </div>
+            </div>
+
+            {/* Filter tabs */}
+            <div className="flex gap-1">
+              {(['all', 'accepted', 'pending'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setFilterAccepted(f)}
+                  className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                    filterAccepted === f
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  {f === 'all' ? `All (${acceptance.total})` : f === 'accepted' ? `Accepted (${acceptance.accepted})` : `Pending (${acceptance.pending})`}
+                </button>
+              ))}
+            </div>
+
+            {/* User table */}
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-gray-800/50 text-left">
+                    <th className="px-3 py-2 font-medium">Name</th>
+                    <th className="px-3 py-2 font-medium">Role</th>
+                    <th className="px-3 py-2 font-medium">Accepted Version</th>
+                    <th className="px-3 py-2 font-medium">Date</th>
+                    <th className="px-3 py-2 font-medium text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUsers.length === 0 && (
+                    <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">No users found.</td></tr>
+                  )}
+                  {filteredUsers.map(u => (
+                    <tr key={u.id} className="border-t hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <td className="px-3 py-2">
+                        <p className="font-medium">{u.name}</p>
+                        <p className="text-muted-foreground">@{u.username}</p>
+                      </td>
+                      <td className="px-3 py-2"><Badge variant="outline" className="text-xs">{roleLabels[u.role] || u.role}</Badge></td>
+                      <td className="px-3 py-2">{u.acceptedVersion !== null ? `v${u.acceptedVersion}` : '—'}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{u.acceptedAt ? new Date(u.acceptedAt).toLocaleDateString() : '—'}</td>
+                      <td className="px-3 py-2 text-right">
+                        {u.isUpToDate ? (
+                          <span className="text-green-600 dark:text-green-400 flex items-center gap-1 justify-end"><CheckCircle className="h-3 w-3" /> Up to date</span>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400">Needs re-acceptance</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {acceptance.pending > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Users with "Needs re-acceptance" will be prompted to accept the latest version on their next login.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
