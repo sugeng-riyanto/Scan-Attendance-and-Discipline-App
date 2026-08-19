@@ -9,6 +9,18 @@ import { useAppStore } from '@/lib/stores/app-store'
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444'] // green, amber, red
 
+/** Dark-mode-aware custom tooltip for the pie chart */
+function DarkTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-md dark:border-gray-700 dark:bg-gray-800">
+      <p className="font-medium text-gray-900 dark:text-gray-100">{d.name}</p>
+      <p className="text-gray-600 dark:text-gray-400">{d.value} users ({((d.value / (payload[0]?.payload?.total || d.value)) * 100).toFixed(0)}%)</p>
+    </div>
+  )
+}
+
 /**
  * Dashboard widget showing T&C acceptance progress as a pie chart.
  * Shows accepted vs pending users with a clickable link to the full
@@ -43,7 +55,7 @@ export function TcAcceptanceWidget({ themeColor }: { themeColor?: string }) {
 
   return (
     <Card
-      className="cursor-pointer hover:shadow-md transition-shadow"
+      className="cursor-pointer hover:shadow-md transition-shadow dark:hover:shadow-lg dark:hover:shadow-gray-900/20"
       onClick={() => useAppStore.getState().setActivePage('terms')}
     >
       <CardHeader className="pb-2">
@@ -63,14 +75,20 @@ export function TcAcceptanceWidget({ themeColor }: { themeColor?: string }) {
               cy="50%"
               outerRadius={55}
               innerRadius={30}
-              label={({ name, percent: p }) => `${name} ${(p * 100).toFixed(0)}%`}
+              label={({ name, percent: p, x, y }: any) => (
+                <text x={x} y={y} fill="currentColor" textAnchor="middle" dominantBaseline="central" className="fill-gray-700 dark:fill-gray-300" fontSize={11} fontWeight={500}>
+                  {`${name} ${(p * 100).toFixed(0)}%`}
+                </text>
+              )}
               labelLine={false}
+              stroke="hsl(var(--background))"
+              strokeWidth={2}
             >
               {pieData.map((d, i) => (
                 <Cell key={i} fill={d.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip content={<DarkTooltip />} />
           </PieChart>
         </ResponsiveContainer>
 
