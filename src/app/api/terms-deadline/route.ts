@@ -36,7 +36,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'action must be extend, reset, or set' }, { status: 400 })
     }
 
-    if ((action === 'extend' || action === 'set') && (typeof days !== 'number' || days < 0)) {
+    // Coerce days to number in case it arrives as a string from JSON
+    const numDays = typeof days === 'string' ? parseInt(days, 10) : days
+    if ((action === 'extend' || action === 'set') && (typeof numDays !== 'number' || isNaN(numDays) || numDays < 0)) {
       return NextResponse.json({ error: 'days must be a positive number for extend/set' }, { status: 400 })
     }
 
@@ -62,13 +64,13 @@ export async function POST(request: NextRequest) {
     let newExtension: number
     switch (action) {
       case 'extend':
-        newExtension = targetUser.termsDeadlineExtension + (days || 0)
+        newExtension = targetUser.termsDeadlineExtension + (numDays || 0)
         break
       case 'reset':
         newExtension = 0
         break
       case 'set':
-        newExtension = days || 0
+        newExtension = numDays || 0
         break
       default:
         newExtension = 0
@@ -85,7 +87,7 @@ export async function POST(request: NextRequest) {
 
     // Audit log
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    const actionLabel = action === 'extend' ? `Extended by ${days} days` : action === 'reset' ? 'Reset to 0' : `Set to ${days} days`
+    const actionLabel = action === 'extend' ? `Extended by ${numDays} days` : action === 'reset' ? 'Reset to 0' : `Set to ${numDays} days`
     await logAudit({
       action: 'TERMS_DEADLINE_UPDATED',
       category: 'AUTH',
