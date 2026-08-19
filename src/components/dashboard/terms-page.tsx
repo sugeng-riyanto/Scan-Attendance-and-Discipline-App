@@ -8,7 +8,7 @@ import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
 import { toast } from 'sonner'
 import {
   ScrollText, ShieldCheck, FileText,
-  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight, RefreshCw, Bell
+  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight, RefreshCw, Bell, Clock
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -547,6 +547,7 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
             )}
 
             {acceptance.pending > 0 && (
+              <>
               <Button
                 size="sm"
                 variant="outline"
@@ -570,6 +571,73 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
               >
                 <Bell className="h-3 w-3 mr-1" /> Remind {acceptance.pending} User(s) to Accept v{acceptance.currentVersion}
               </Button>
+
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                  onClick={async () => {
+                    if (!confirm(`Extend deadline by 7 days for all ${acceptance.pending} pending user(s)?`)) return
+                    try {
+                      const data = await apiFetch<{ updated: number; message: string }>('/api/terms-deadline/batch', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'extend', days: 7 }),
+                      })
+                      toast.success(data.message)
+                      loadAcceptance() // Refresh the list
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to extend deadlines')
+                    }
+                  }}
+                >
+                  <Clock className="h-3 w-3 mr-1" /> +7d All
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                  onClick={async () => {
+                    if (!confirm(`Extend deadline by 30 days for all ${acceptance.pending} pending user(s)?`)) return
+                    try {
+                      const data = await apiFetch<{ updated: number; message: string }>('/api/terms-deadline/batch', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'extend', days: 30 }),
+                      })
+                      toast.success(data.message)
+                      loadAcceptance()
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to extend deadlines')
+                    }
+                  }}
+                >
+                  <Clock className="h-3 w-3 mr-1" /> +30d All
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  onClick={async () => {
+                    if (!confirm(`Reset deadline extensions to 0 for all ${acceptance.pending} pending user(s)?`)) return
+                    try {
+                      const data = await apiFetch<{ updated: number; message: string }>('/api/terms-deadline/batch', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'reset' }),
+                      })
+                      toast.success(data.message)
+                      loadAcceptance()
+                    } catch (err: any) {
+                      toast.error(err.message || 'Failed to reset deadlines')
+                    }
+                  }}
+                >
+                  Reset All
+                </Button>
+              </div>
+              </>
             )}
           </CardContent>
         </Card>
