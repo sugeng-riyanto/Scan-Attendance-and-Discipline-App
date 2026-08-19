@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { PageSkeleton } from './page-skeleton'
 import { DisciplinePatternChart } from './discipline-pattern-chart'
+import { TcAcceptanceWidget } from './tc-acceptance-widget'
 import { StatisticsData, BehaviorAlert, ViolationRecord, GoodDeedRecord } from './types'
 
 export function KepsekDashboard() {
@@ -68,6 +69,7 @@ export function KepsekDashboard() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TcAcceptanceWidget />
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
