@@ -13,6 +13,7 @@ import { useAppStore } from '@/lib/stores/app-store'
 import { formatTimeWIB, getStatusColor } from '@/lib/attendance-utils'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { PageSkeleton } from './page-skeleton'
+import { TcAcceptanceWidget } from './tc-acceptance-widget'
 import { STATUS_COLORS } from './chart-constants'
 import { StatisticsData, AttendanceRecord, BehaviorAlert } from './types'
 import { apiFetch } from '@/lib/api-fetch'
@@ -144,6 +145,7 @@ export function AdminDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TcAcceptanceWidget />
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
