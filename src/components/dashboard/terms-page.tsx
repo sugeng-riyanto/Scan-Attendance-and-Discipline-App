@@ -566,13 +566,16 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                 className="w-full border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-950/30"
                 onClick={async () => {
                   try {
-                    const data = await apiFetch<{ notified: number; roleCounts: Record<string, number> }>('/api/terms-remind', {
+                    const data = await apiFetch<{ notified: number; roleCounts: Record<string, number>; email: { sent: number; failed: number } }>('/api/terms-remind', {
                       method: 'POST',
                     })
                     const breakdown = Object.entries(data.roleCounts || {})
                       .map(([role, count]) => `${roleLabels[role] || role}: ${count}`)
                       .join(', ')
-                    toast.success(`Reminder sent to ${data.notified} user(s)${breakdown ? ` (${breakdown})` : ''}`)
+                    const emailInfo = data.email?.sent
+                      ? ` | 📧 ${data.email.sent} email(s) sent${data.email.failed ? `, ${data.email.failed} failed` : ''}`
+                      : data.email?.failed ? ` | 📧 ${data.email.failed} email(s) failed` : ''
+                    toast.success(`Reminder sent to ${data.notified} user(s)${breakdown ? ` (${breakdown})` : ''}${emailInfo}`)
                   } catch (err: any) {
                     toast.error(err.message || 'Failed to send reminders')
                   }

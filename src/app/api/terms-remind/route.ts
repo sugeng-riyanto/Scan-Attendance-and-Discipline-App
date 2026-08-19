@@ -4,16 +4,20 @@ import { getAuthUser } from '@/lib/auth-utils'
 import { getSchoolScope } from '@/lib/school-scope'
 import { logAudit } from '@/lib/audit'
 import { emitSocketEvent } from '@/lib/socket-server'
+import { sendEmail, buildTermsReminderEmail } from '@/lib/email'
+
+const TERMS_DEADLINE_DAYS = 30
 
 /**
  * POST /api/terms-remind
  *
  * Admin-only endpoint that finds all users who haven't accepted the current
- * active T&C version and broadcasts a `terms:remind` socket event to notify
- * them.  Affected users who are currently logged in will see a toast nudge
- * on their dashboard.
+ * active T&C version and:
+ * 1. Broadcasts a `terms:remind` socket event (for online users — toast nudge)
+ * 2. Sends an email reminder to users who have an email address (for offline
+ *    users who won't see the socket toast)
  *
- * Returns a summary of how many users were notified.
+ * Returns a summary of how many users were notified via each channel.
  */
 export async function POST(request: NextRequest) {
   const auth = getAuthUser(request)
@@ -22,19 +26,25 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Find the current active T&C version
+    // Find the current active T&C version + publication date
     const activeTerms = await db.termsContent.findFirst({
       where: { isActive: true },
       orderBy: { version: 'desc' },
-      select: { version: true, title: true },
+      select: { version: true, title: true, createdAt: true },
     })
 
     if (!activeTerms) {
       return NextResponse.json({ error: 'No active Terms & Conditions found' }, { status: 404 })
     }
 
+    // Calculate deadline for email content
+    const publishedAt = new Date(activeTerms.createdAt)
+    const deadline = new Date(publishedAt)
+    deadline.setDate(deadline.getDate() + TERMS_DEADLINE_DAYS)
+    const daysRemaining = Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+
     // Find all users who haven't accepted the current version
-    // Scope to the same school as the admin (unless SUPER_ADMIN)
+    // Include email + school info for email sending
     const whereClause: any = {
       isActive: true,
       OR: [
@@ -44,10 +54,24 @@ export async function POST(request: NextRequest) {
     }
 
     // School scoping: admin/kepsek only sees their own school's users
+    let schoolName = 'Sekolah'
     if (auth.role !== 'SUPER_ADMIN') {
       const scope = await getSchoolScope(auth)
       if (scope.schoolId) {
         whereClause.schoolId = scope.schoolId
+        // Fetch school name for email content
+        const school = await db.school.findUnique({ where: { id: scope.schoolId }, select: { name: true } })
+        if (school) schoolName = school.name
+      }
+    } else {
+      // SUPER_ADMIN: get school name from the first affected user's school
+      const sampleUser = await db.user.findFirst({
+        where: whereClause,
+        select: { schoolId: true },
+      })
+      if (sampleUser?.schoolId) {
+        const school = await db.school.findUnique({ where: { id: sampleUser.schoolId }, select: { name: true } })
+        if (school) schoolName = school.name
       }
     }
 
@@ -58,6 +82,7 @@ export async function POST(request: NextRequest) {
         name: true,
         username: true,
         role: true,
+        email: true,
         termsAcceptedVersion: true,
       },
     })
@@ -70,9 +95,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Broadcast a socket event to all connected dashboards so affected users
-    // see a toast nudge immediately.  The event includes the user IDs so the
-    // client can filter — only users whose ID is in the list will see the toast.
+    // --- Channel 1: Socket event (for online users) ---
     try {
       emitSocketEvent('terms:remind', {
         version: activeTerms.version,
@@ -82,7 +105,57 @@ export async function POST(request: NextRequest) {
         timestamp: new Date().toISOString(),
       })
     } catch {
-      // Socket service may be down — not fatal, the reminder is still logged
+      // Socket service may be down — not fatal
+    }
+
+    // --- Channel 2: Email (for users with email addresses) ---
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const usersWithEmail = pendingUsers.filter(u => u.email && u.email.trim().length > 0)
+    let emailsSent = 0
+    let emailsFailed = 0
+    const emailErrors: string[] = []
+
+    if (usersWithEmail.length > 0) {
+      const emailHtml = buildTermsReminderEmail({
+        userName: '', // Will be customized per user below
+        schoolName,
+        termsVersion: activeTerms.version,
+        termsTitle: activeTerms.title,
+        daysRemaining,
+        deadline: deadline.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+        appUrl,
+      })
+
+      // Send emails in parallel (batch of 5 to avoid SMTP rate limits)
+      const BATCH_SIZE = 5
+      for (let i = 0; i < usersWithEmail.length; i += BATCH_SIZE) {
+        const batch = usersWithEmail.slice(i, i + BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(user => {
+            const personalizedHtml = emailHtml.replace(
+              /Halo <strong>.*?<\/strong>/,
+              `Halo <strong>${user.name}</strong>`
+            )
+            return sendEmail({
+              to: user.email!,
+              subject: `[${schoolName}] Persetujuan Syarat & Ketentuan v${activeTerms.version} Diperlukan`,
+              html: personalizedHtml,
+              text: `Halo ${user.name},\n\n${schoolName} telah memperbarui Syarat & Ketentuan v${activeTerms.version}. Sisa waktu: ${daysRemaining} hari (deadline: ${deadline.toLocaleDateString('id-ID')}).\n\nSilakan buka ${appUrl}/terms untuk menyetujui.\n\nJika tidak disetujui dalam ${TERMS_DEADLINE_DAYS} hari, akun Anda akan terkunci.`,
+            })
+          })
+        )
+
+        for (let j = 0; j < results.length; j++) {
+          const result = results[j]
+          if (result.status === 'fulfilled' && result.value.sent) {
+            emailsSent++
+          } else {
+            emailsFailed++
+            const reason = result.status === 'rejected' ? result.reason?.message : result.value.reason
+            emailErrors.push(`${batch[j].username}: ${reason}`)
+          }
+        }
+      }
     }
 
     // Audit log
@@ -95,7 +168,7 @@ export async function POST(request: NextRequest) {
       username: auth.username,
       role: auth.role,
       ip,
-      details: `Sent T&C v${activeTerms.version} reminder to ${pendingUsers.length} user(s)`,
+      details: `T&C v${activeTerms.version} reminder: ${pendingUsers.length} users, ${emailsSent} emails sent, ${emailsFailed} failed`,
     })
 
     // Build summary by role
@@ -109,10 +182,17 @@ export async function POST(request: NextRequest) {
       notified: pendingUsers.length,
       version: activeTerms.version,
       roleCounts,
+      email: {
+        sent: emailsSent,
+        failed: emailsFailed,
+        skipped: usersWithEmail.length === 0 ? 'No users with email addresses' : undefined,
+        errors: emailErrors.length > 0 ? emailErrors.slice(0, 5) : undefined, // Limit error details
+      },
       users: pendingUsers.map(u => ({
         name: u.name,
         username: u.username,
         role: u.role,
+        email: u.email || null,
         lastAcceptedVersion: u.termsAcceptedVersion,
       })),
     })
