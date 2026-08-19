@@ -28,6 +28,11 @@ interface TermsRecord {
   updatedAt: string
 }
 
+interface AcceptanceUser {
+  id: string; name: string; username: string; role: string
+  acceptedVersion: number | null; acceptedAt: string | null; isUpToDate: boolean
+}
+
 const EDIT_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'KEPALA_SEKOLAH'])
 
 /** Default T&C content used when the DB has no record yet */
@@ -176,10 +181,6 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
   }
 
   // Acceptance tracking
-  interface AcceptanceUser {
-    id: string; name: string; username: string; role: string
-    acceptedVersion: number | null; acceptedAt: string | null; isUpToDate: boolean
-  }
   const [acceptance, setAcceptance] = useState<{
     currentVersion: number; total: number; accepted: number; pending: number; users: AcceptanceUser[]
   } | null>(null)
@@ -522,32 +523,18 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                   <tr className="bg-gray-50 dark:bg-gray-800/50 text-left">
                     <th className="px-3 py-2 font-medium">Name</th>
                     <th className="px-3 py-2 font-medium">Role</th>
-                    <th className="px-3 py-2 font-medium">Accepted Version</th>
+                    <th className="px-3 py-2 font-medium">Accepted</th>
                     <th className="px-3 py-2 font-medium">Date</th>
                     <th className="px-3 py-2 font-medium text-right">Status</th>
+                    <th className="px-3 py-2 font-medium text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.length === 0 && (
-                    <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">No users found.</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No users found.</td></tr>
                   )}
                   {filteredUsers.map(u => (
-                    <tr key={u.id} className="border-t hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                      <td className="px-3 py-2">
-                        <p className="font-medium">{u.name}</p>
-                        <p className="text-muted-foreground">@{u.username}</p>
-                      </td>
-                      <td className="px-3 py-2"><Badge variant="outline" className="text-xs">{roleLabels[u.role] || u.role}</Badge></td>
-                      <td className="px-3 py-2">{u.acceptedVersion !== null ? `v${u.acceptedVersion}` : '—'}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{u.acceptedAt ? new Date(u.acceptedAt).toLocaleDateString() : '—'}</td>
-                      <td className="px-3 py-2 text-right">
-                        {u.isUpToDate ? (
-                          <span className="text-green-600 dark:text-green-400 flex items-center gap-1 justify-end"><CheckCircle className="h-3 w-3" /> Up to date</span>
-                        ) : (
-                          <span className="text-amber-600 dark:text-amber-400">Needs re-acceptance</span>
-                        )}
-                      </td>
-                    </tr>
+                    <UserAcceptanceRow key={u.id} user={u} themeColor={user?.school?.themeColor || '#10b981'} />
                   ))}
                 </tbody>
               </table>
@@ -676,5 +663,77 @@ function TermsAcceptButton({
         {busy ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />} Saya Setujui Syarat & Ketentuan v{currentVersion}
       </Button>
     </div>
+  )
+}
+
+/**
+ * Table row for a single user in the acceptance tracking panel.
+ * Shows extend/reset deadline buttons for users who haven't accepted yet.
+ */
+function UserAcceptanceRow({ user, themeColor }: { user: AcceptanceUser; themeColor: string }) {
+  const [extending, setExtending] = React.useState(false)
+  const handleDeadline = async (action: 'extend' | 'reset', days?: number) => {
+    setExtending(true)
+    try {
+      const data = await apiFetch<{ message: string }>('/api/terms-deadline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, userId: user.id, days }),
+      })
+      toast.success(data.message)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update deadline')
+    } finally {
+      setExtending(false)
+    }
+  }
+
+  return (
+    <tr className="border-t hover:bg-gray-50 dark:hover:bg-gray-800/30">
+      <td className="px-3 py-2">
+        <p className="font-medium">{user.name}</p>
+        <p className="text-muted-foreground">@{user.username}</p>
+      </td>
+      <td className="px-3 py-2"><Badge variant="outline" className="text-xs">{roleLabels[user.role] || user.role}</Badge></td>
+      <td className="px-3 py-2">{user.acceptedVersion !== null ? `v${user.acceptedVersion}` : '—'}</td>
+      <td className="px-3 py-2 text-muted-foreground">{user.acceptedAt ? new Date(user.acceptedAt).toLocaleDateString() : '—'}</td>
+      <td className="px-3 py-2 text-right">
+        {user.isUpToDate ? (
+          <span className="text-green-600 dark:text-green-400 flex items-center gap-1 justify-end"><CheckCircle className="h-3 w-3" /> Up to date</span>
+        ) : (
+          <span className="text-amber-600 dark:text-amber-400">Needs re-acceptance</span>
+        )}
+      </td>
+      <td className="px-3 py-2 text-right">
+        {!user.isUpToDate && (
+          <div className="flex gap-1 justify-end">
+            <Button
+              variant="ghost" size="sm" className="text-xs h-6 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+              onClick={() => handleDeadline('extend', 7)}
+              disabled={extending}
+              title="Extend deadline by 7 days"
+            >
+              +7d
+            </Button>
+            <Button
+              variant="ghost" size="sm" className="text-xs h-6 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+              onClick={() => handleDeadline('extend', 30)}
+              disabled={extending}
+              title="Extend deadline by 30 days"
+            >
+              +30d
+            </Button>
+            <Button
+              variant="ghost" size="sm" className="text-xs h-6 px-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+              onClick={() => handleDeadline('reset')}
+              disabled={extending}
+              title="Reset extension to 0"
+            >
+              Reset
+            </Button>
+          </div>
+        )}
+      </td>
+    </tr>
   )
 }

@@ -65,7 +65,9 @@ export async function POST(request: NextRequest) {
     if (activeTerms?.createdAt) {
       const publishedAt = new Date(activeTerms.createdAt);
       const deadline = new Date(publishedAt);
-      deadline.setDate(deadline.getDate() + TERMS_DEADLINE_DAYS);
+      // Per-user deadline extension: admins can add extra days for specific users
+      const userExtension = (user as any).termsDeadlineExtension ?? 0;
+      deadline.setDate(deadline.getDate() + TERMS_DEADLINE_DAYS + userExtension);
       const now = new Date();
       daysUntilDeadline = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
       deadlineLocked = now > deadline;

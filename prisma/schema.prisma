@@ -104,6 +104,7 @@ model User {
   isActive        Boolean  @default(true)
   termsAcceptedAt DateTime?
   termsAcceptedVersion Int?    // T&C version the user last accepted (re-accept on new version)
+  termsDeadlineExtension Int @default(0) // Extra days added to the 30-day T&C deadline for this user
   email           String?
   // Account security & reminders (per-role Pengaturan Akun)
   pinHash        String?  // hashed PIN for quick unlock (login cepat)
