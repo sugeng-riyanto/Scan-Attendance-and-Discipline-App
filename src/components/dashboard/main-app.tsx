@@ -56,6 +56,29 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
     toast.info('Database di-reset — menampilkan data terbaru', { id: 'data-reset' })
   })
 
+  // T&C re-acceptance reminder: admin sends a bulk reminder to users who
+  // haven't accepted the latest version.  Only affected users see the toast.
+  useSocketEvent('terms:remind', (data: any) => {
+    const u = useAuthStore.getState().user
+    if (!u) return
+    const userIds: string[] = data?.userIds || []
+    const version = data?.version
+    const title = data?.title
+    if (userIds.includes(u.id)) {
+      toast.warning(
+        `Syarat & Ketentuan v${version} telah diperbarui. Silakan buka halaman Terms & Conditions untuk menyetujui versi terbaru.`,
+        {
+          id: `terms-remind-${version}`,
+          duration: 20000,
+          action: {
+            label: 'Buka Terms',
+            onClick: () => useAppStore.getState().setActivePage('terms'),
+          },
+        }
+      )
+    }
+  })
+
   // Automatic subscription reminders: the server's periodic checker broadcasts
   // 'subscription:alert' (schools expiring ≤30 days + locked). The Super Admin
   // sees a summary; a school's own Admin/Kepala Sekolah sees its own alert.

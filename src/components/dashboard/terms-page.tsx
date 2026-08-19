@@ -8,7 +8,7 @@ import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
 import { toast } from 'sonner'
 import {
   ScrollText, ShieldCheck, FileText,
-  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight, RefreshCw
+  Edit3, Plus, Trash2, CheckCircle, Save, X, History, ChevronDown, ChevronRight, RefreshCw, Bell
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -556,6 +556,29 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
               <p className="text-xs text-muted-foreground">
                 Users with "Needs re-acceptance" will be prompted to accept the latest version on their next login.
               </p>
+            )}
+
+            {acceptance.pending > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                onClick={async () => {
+                  try {
+                    const data = await apiFetch<{ notified: number; roleCounts: Record<string, number> }>('/api/terms-remind', {
+                      method: 'POST',
+                    })
+                    const breakdown = Object.entries(data.roleCounts || {})
+                      .map(([role, count]) => `${roleLabels[role] || role}: ${count}`)
+                      .join(', ')
+                    toast.success(`Reminder sent to ${data.notified} user(s)${breakdown ? ` (${breakdown})` : ''}`)
+                  } catch (err: any) {
+                    toast.error(err.message || 'Failed to send reminders')
+                  }
+                }}
+              >
+                <Bell className="h-3 w-3 mr-1" /> Remind {acceptance.pending} User(s) to Accept v{acceptance.currentVersion}
+              </Button>
             )}
           </CardContent>
         </Card>
