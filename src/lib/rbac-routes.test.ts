@@ -3,10 +3,13 @@
  * Requires dev server running on http://localhost:3000 with seeded data.
  * Run: bun test src/lib/rbac-routes.test.ts
  *
- * NOTE: bun test runner has a known issue where Cookie headers in fetch
- * requests are not properly forwarded, causing all authenticated requests
- * to return 401/403. This works correctly outside the test runner.
- * To verify RBAC outside bun test: bun -e "<inline test script>"
+ * `allowedRoles` below records the roles each route guard *lists*. It is not the
+ * whole set of roles that pass: `requireRole` (src/lib/auth-utils.ts) returns
+ * true for SUPER_ADMIN before consulting the list, because the platform
+ * administrator is the multi-tenant operator and can reach every school's pages
+ * and APIs. Preview mode narrows the data such an actor sees, never its access.
+ * So a 403 for SUPER_ADMIN is not expressible as a per-endpoint expectation; the
+ * sweep applies it as one rule instead (see `shouldAllow` below).
  */
 import { afterAll, describe, expect, it } from 'bun:test'
 
@@ -118,8 +121,12 @@ for (const [username, account] of Object.entries(ACCOUNTS)) {
     })
 
     for (const ep of EP) {
-      // _public endpoints are accessible to everyone
-      const shouldAllow = ep.allowedRoles.includes('_public') || ep.allowedRoles.includes(account.role)
+      // _public endpoints are accessible to everyone, and SUPER_ADMIN passes
+      // every role gate by design (see the header note), so it is allowed
+      // everywhere rather than in each of the lists below.
+      const shouldAllow = ep.allowedRoles.includes('_public')
+        || ep.allowedRoles.includes(account.role)
+        || account.role === 'SUPER_ADMIN'
       it(`${ep.label} → ${shouldAllow ? 'allowed' : '403'}`, async () => {
         const t = await getToken(username)
         if (!t) return // skip if login failed (previous test would fail)
@@ -128,6 +135,9 @@ for (const [username, account] of Object.entries(ACCOUNTS)) {
         if (shouldAllow) {
           expect(s).not.toBe(401)
           expect(s).not.toBe(403)
+          // The probe bodies are deliberately incomplete, so a 400 is a
+          // legitimate answer — but a 5xx never is: it means the handler threw.
+          expect(s).toBeLessThan(500)
         } else {
           expect(s).toBe(403)
         }

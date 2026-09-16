@@ -152,6 +152,8 @@ The app is available at **http://localhost:3000**.
 ### Data Isolation
 
 - **Super Admin** can see data from all schools; a **school preview mode** lets them view the app as any school's user
+- **A super admin passes every role guard.** `requireRole` (`src/lib/auth-utils.ts`) returns true for `SUPER_ADMIN` before consulting the endpoint's list (`rolePermissions.SUPER_ADMIN = ['all']`), so the platform account can call every school-scoped API; preview mode narrows the *data* it sees, never its access. The RBAC sweep (`src/lib/rbac-routes.test.ts`) encodes that rule once instead of listing `SUPER_ADMIN` on 25 endpoints, and its per-endpoint role lists are what the guards actually enforce — a `403` for Super Admin is not an expressible expectation
+- **Reports & Export is not a teacher's endpoint.** `/api/export` and `/api/export-pdf` are school-wide (the `classId` filter defaults to all), which is broader than `GURU`'s `view_assigned_classes`, so their guards list Admin, Principal, VP, Homeroom and Security only — matching the menu matrix above, `nav-config.tsx` and `rolePermissions` (`export_reports`)
 - **All other roles** are strictly scoped to their own school via `getSchoolScope` — cross-school queries return empty
 - **Students, Classes, Attendance, Violations, Good Deeds, Permissions, Alerts, Audit Logs** are all school-scoped
 - **User accounts** are school-scoped for **reads and writes**, on both list endpoints (`GET /api/users` and `GET /api/auth`, the one Settings → Users renders): a school-bound actor only ever sees accounts of their own school, a super admin previewing a school sees exactly that school, and an actor with no school binding sees nobody. Writes are scoped the same way — an admin can only reset the password, re-role, move or deactivate accounts of their **own** school. A target in another school reads as not found, so the endpoint cannot be used to probe other tenants, and platform (`SUPER_ADMIN`) accounts are never manageable from inside a school
@@ -271,8 +273,8 @@ All endpoints are JWT-protected (except `/api/auth` POST login, `/api/setup`, an
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/statistics` | Multi-period attendance statistics |
-| `GET` | `/api/export` | Export Excel |
-| `GET` | `/api/export-pdf` | Export PDF |
+| `GET` | `/api/export` | Export Excel (Admin, Principal, VP, Homeroom, Security — school-scoped, optional `classId`) |
+| `GET` | `/api/export-pdf` | Export PDF (same roles as `/api/export`) |
 
 ### Other
 | Method | Path | Description |
