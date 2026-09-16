@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyPassword, signToken, getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
 export async function POST(request: NextRequest) {
@@ -170,7 +171,20 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const role = searchParams.get('role');
 
+    // Same school scoping as GET /api/users — this endpoint feeds the Settings →
+    // Users screen and the duty-roster teacher picker, so an unscoped list here
+    // leaks every school's accounts (username, name, role, NIP, homeroom) to any
+    // staff member, and shows all tenants to a super admin previewing a school.
+    //
+    // Not `{ ...scope.schoolWhere }`: that helper's deny marker is `{ id: null }`,
+    // which Prisma rejects for a required field instead of matching nothing.
+    const scope = await getSchoolScope(auth);
     const where: Record<string, unknown> = {};
+    if (scope.schoolId) {
+      where.schoolId = scope.schoolId;
+    } else if (!scope.isSuperAdmin) {
+      where.id = '__no_match__';
+    }
     if (role) where.role = role;
 
     const users = await db.user.findMany({

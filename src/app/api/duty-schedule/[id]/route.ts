@@ -4,9 +4,12 @@ import { getAuthUser, requireRole } from '@/lib/auth-utils';
 
 const ROLES = ['VP_KESISWAAN'];
 
+// Next 16 hands route params to handlers as a Promise. Reading `params.id`
+// synchronously yields undefined, which Prisma rejects with "needs at least one
+// of `id` arguments" — so both handlers below await it.
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const auth = getAuthUser(request);
@@ -14,7 +17,7 @@ export async function PUT(
     if (!requireRole(auth.role, ROLES)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
     const { dayOfWeek, startTime, endTime, teacherId, location, tasks, isActive } = body;
 
@@ -44,7 +47,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const auth = getAuthUser(request);
@@ -52,7 +55,7 @@ export async function DELETE(
     if (!requireRole(auth.role, ROLES)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const { id } = params;
+    const { id } = await params;
 
     await db.dutySchedule.delete({ where: { id } });
     return NextResponse.json({ message: 'Jadwal jaga dihapus' });

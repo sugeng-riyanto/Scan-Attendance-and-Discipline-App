@@ -74,14 +74,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
-    const { nisn, name, classId, academicYearId, gender, qrCode, photoBase64, address, email, phone, status } = body;
+    const { nisn, name, classId, academicYearId, gender, qrCode, photoBase64, photoUrl, address, email, phone, status } = body;
 
     if (!nisn || !name || !classId || !academicYearId) {
       return NextResponse.json({ error: 'NISN, Nama, Kelas, dan Tahun Ajaran wajib diisi' }, { status: 400 });
     }
 
-    // Per-school isolation: the new student is bound to the actor's school.
+    // No HP is required for a *new* student — the settings form marks the field
+    // with a red *. Rows created before this rule (seeder, bulk import) may
+    // still be empty, so PUT below only blocks clearing a phone that exists.
+    const cleanPhone = String(phone ?? '').trim();
+    if (!cleanPhone) {
+      return NextResponse.json({ error: 'No HP wajib diisi' }, { status: 400 });
+    }
+
+    // Per-school isolation: the new student — and the login created with it — is
+    // bound to the actor's school, and the class it is filed into must belong to
+    // that school, so an admin of another school cannot file a student into
+    // school-A's class and inherit its roster. A SUPER_ADMIN previewing a school
+    // acts as that school; a school-bound actor is pinned to their own; an actor
+    // with no school binding must not create unbound students and logins.
     const scope = await getSchoolScope(auth);
+    if (!scope.schoolId && !scope.isSuperAdmin) {
+      return NextResponse.json({ error: 'Akun Anda tidak terhubung ke sekolah mana pun' }, { status: 403 });
+    }
+
+    if (scope.schoolId) {
+      const ownedClass = await db.class.findFirst({
+        where: { id: classId, schoolId: scope.schoolId },
+        select: { id: true },
+      });
+      if (!ownedClass) {
+        return NextResponse.json({ error: 'Kelas tidak ditemukan di sekolah Anda' }, { status: 404 });
+      }
+    }
 
     // Auto-create User account for the student (bound to the same school)
     const username = `student_${nisn}`;
@@ -111,10 +137,13 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         qrCode: studentQrCode,
         gender: gender || null,
-        photoBase64: photoBase64 || null,
+        // Clients (settings page, ID card) send the student photo as base64.
+        // Student has no photoBase64 column — it is stored in photoUrl, which
+        // holds either a URL or a data URL and is what the UI renders.
+        photoUrl: photoBase64 || photoUrl || null,
         address: address || null,
         email: email || null,
-        phone: phone || null,
+        phone: cleanPhone,
         status: status || 'AKTIF',
       },
       include: { class: true, user: { select: { name: true, username: true } } },
@@ -159,13 +188,36 @@ export async function PUT(request: NextRequest) {
       if (!owned) return NextResponse.json({ error: 'Siswa tidak ditemukan di sekolah Anda' }, { status: 404 });
     }
 
+    // No HP is required when creating a student, so an existing one can't be
+    // blanked later — that would quietly undo the requirement. Students that
+    // were created empty (seeder, bulk import) stay editable as they are.
+    if (data.phone !== undefined && !String(data.phone).trim()) {
+      const current = await db.student.findUnique({ where: { id }, select: { phone: true } });
+      if (current?.phone) {
+        return NextResponse.json({ error: 'No HP wajib diisi' }, { status: 400 });
+      }
+    }
+
     // Filter out fields that shouldn't be updated directly
-    const allowedFields = ['nisn', 'name', 'classId', 'academicYearId', 'gender', 'qrCode', 'photoBase64', 'address', 'email', 'phone', 'status', 'photoUrl', 'totalViolationPoints', 'totalGoodPoints', 'faceCaptureEnabled', 'idCardVisibleToStudent', 'idCardVisibleToParent'];
+    const allowedFields = ['nisn', 'name', 'classId', 'academicYearId', 'gender', 'qrCode', 'address', 'email', 'phone', 'status', 'photoUrl', 'totalViolationPoints', 'totalGoodPoints', 'faceCaptureEnabled', 'idCardVisibleToStudent', 'idCardVisibleToParent'];
     const updateData: any = {};
     for (const key of allowedFields) {
       if (data[key] !== undefined) {
         updateData[key] = data[key];
       }
+    }
+    // Same mapping as POST: the client's photoBase64 lands in photoUrl.
+    // (Leaving it in allowedFields would send an unknown column to Prisma and
+    // fail the whole update.)
+    if (data.photoBase64 !== undefined) {
+      updateData.photoUrl = data.photoBase64;
+    }
+    // Students that predate the required-No HP rule keep phone = null, while the
+    // settings form always submits the field — so store an empty one as null
+    // instead of rewriting the legacy row to ''.  (Blanking a phone that does
+    // exist is refused above.)
+    if (updateData.phone !== undefined) {
+      updateData.phone = String(updateData.phone).trim() || null;
     }
 
     // If name is being updated, also update the user's name

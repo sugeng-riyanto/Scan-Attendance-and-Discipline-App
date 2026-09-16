@@ -575,10 +575,13 @@ function UsersTab({ themeColor }: { themeColor: string }) {
                 </Select>
               </div>
               <div><Label className="text-xs">School</Label>
+                {/* No "no school" choice on edit: the API keeps the existing binding
+                    when no school is named, so offering it would only look like an
+                    unbind that never happens. */}
                 <Select value={form.schoolId || 'NONE'} onValueChange={v => setForm(p => ({ ...p, schoolId: v === 'NONE' ? '' : v }))}>
                   <SelectTrigger><SelectValue placeholder="Choose school" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="NONE">— Choose school —</SelectItem>
+                    {!editId && <SelectItem value="NONE">— Choose school —</SelectItem>}
                     {schools.map(s => <SelectItem key={s.id} value={s.id}>{s.code} — {s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>

@@ -135,7 +135,12 @@ export async function PUT(request: NextRequest) {
       where: { id },
       data: {
         status,
-        adminNotes: adminNotes?.slice(0, 2000) || null,
+        // Notes are rewritten only when this request actually carries them: a
+        // request can be processed more than once (APPROVED → COMPLETED), and
+        // `adminNotes?.slice() || null` erased whatever the admin had written on
+        // the first pass whenever the second one omitted the field. Sending ''
+        // still clears them deliberately.
+        ...(adminNotes !== undefined ? { adminNotes: adminNotes?.slice(0, 2000) || null } : {}),
         processedBy: auth.username,
         processedAt: new Date(),
       },

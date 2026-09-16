@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole, hashPassword } from '@/lib/auth-utils';
+import { lockoutGuard } from '@/lib/user-lockout';
 import { logAudit } from '@/lib/audit';
 
 // SUPER_ADMIN only — multi-school management (sekolah + langganan + pengguna RBAC).
@@ -261,10 +262,39 @@ export async function POST(request: NextRequest) {
           await logAudit({ action: 'USER_CREATE', category: 'ACCOUNT', severity: 'INFO', userId: auth.userId, username: auth.username, role: auth.role, ip, details: `Pengguna baru ${username} (${role})` });
           return NextResponse.json({ message: 'Pengguna dibuat' });
         }
-        await db.user.update({
+        // Platform edits are still edits: this action sets `role` and `schoolId`,
+        // so it can take the last administrator away from a school exactly like
+        // the school-level endpoint — the guard has to hold here too. An empty
+        // `schoolId` is no longer a tenant move (see below), so it can't strip a
+        // school of its last admin either.
+        const edited = await db.user.findUnique({
           where: { id },
-          data: { username, name, role, schoolId: schoolId || null, email: email || null, ...(password ? { password: hashPassword(password) } : {}) },
+          select: { id: true, role: true, schoolId: true, isActive: true },
         });
+        if (edited) {
+          const refused = await lockoutGuard({
+            actorId: auth.userId,
+            target: edited,
+            removesAdmin: role !== 'ADMIN' || (!!schoolId && schoolId !== edited.schoolId),
+          });
+          if (refused) return refused;
+        }
+
+        // `schoolId` is written only when the request actually names a school.
+        // It used to be `schoolId || null`, so any update that left the field out
+        // — which the school-scoped screens do — silently unbound the account, and
+        // an unbound account can neither manage nor see anything. Omitting it now
+        // means "leave the school as it is".
+        const editData: Prisma.UserUncheckedUpdateInput = {
+          username,
+          name,
+          role,
+          email: email || null,
+          ...(password ? { password: hashPassword(password) } : {}),
+        };
+        if (schoolId) editData.schoolId = schoolId;
+
+        await db.user.update({ where: { id }, data: editData });
         await logAudit({ action: 'USER_UPDATE', category: 'ACCOUNT', severity: 'INFO', userId: auth.userId, username: auth.username, role: auth.role, ip, details: `Perbarui pengguna ${username}` });
         return NextResponse.json({ message: 'Pengguna diperbarui' });
       }
@@ -272,6 +302,10 @@ export async function POST(request: NextRequest) {
         const { id } = body;
         const target = await db.user.findUnique({ where: { id } });
         if (target?.role === 'SUPER_ADMIN') return NextResponse.json({ error: 'Tidak dapat menghapus akun SUPER_ADMIN' }, { status: 400 });
+        if (target) {
+          const refused = await lockoutGuard({ actorId: auth.userId, target, deactivates: true });
+          if (refused) return refused;
+        }
         // Remove dependent records first (Teacher/Student/Parent reference User).
         await db.teacher.deleteMany({ where: { userId: id } });
         await db.parent.deleteMany({ where: { userId: id } });
@@ -293,6 +327,10 @@ export async function POST(request: NextRequest) {
         const { id, isActive } = body;
         const target = await db.user.findUnique({ where: { id } });
         if (target?.role === 'SUPER_ADMIN') return NextResponse.json({ error: 'Tidak dapat menonaktifkan akun SUPER_ADMIN' }, { status: 400 });
+        if (target) {
+          const refused = await lockoutGuard({ actorId: auth.userId, target, deactivates: !isActive });
+          if (refused) return refused;
+        }
         await db.user.update({ where: { id }, data: { isActive: !!isActive } });
         return NextResponse.json({ message: isActive ? 'Pengguna diaktifkan' : 'Pengguna dinonaktifkan' });
       }
@@ -303,12 +341,34 @@ export async function POST(request: NextRequest) {
       if (action === 'upsert') {
         const { schoolId, status, periodStart, periodEnd, price, notes } = body;
         if (!schoolId) return NextResponse.json({ error: 'Pilih sekolah' }, { status: 400 });
-        const data: any = { status: status || 'ACTIVE', plan: 'YEARLY', notes: notes || null };
-        if (price !== undefined && price !== null) data.price = Number(price) || 0;
-        if (periodStart) data.periodStart = new Date(periodStart);
-        if (periodEnd) data.periodEnd = new Date(periodEnd);
-        const sub = await db.subscription.upsert({ where: { schoolId }, update: data, create: { schoolId, ...data } });
-        await logAudit({ action: 'SUBSCRIPTION_UPDATE', category: 'SETTINGS', severity: status === 'ACTIVE' ? 'INFO' : 'WARNING', userId: auth.userId, username: auth.username, role: auth.role, ip, schoolId, details: `Langganan sekolah ${sub.id}: ${status}` });
+
+        // Only the fields this request names are written to an existing row. The
+        // create-time defaults used to be applied to the update branch as well,
+        // so a partial edit behaved like a state change: changing only the price
+        // reset the status to ACTIVE — re-opening a suspended or expired school
+        // whose logins are blocked — and erased the notes.
+        // `price` counts as "not named" when it is an empty string (the panel
+        // sends '' for a subscription that has none), rather than meaning 0.
+        const priceGiven = price !== undefined && price !== null && price !== '';
+        const update: Prisma.SubscriptionUncheckedUpdateInput = { plan: 'YEARLY' };
+        if (status !== undefined) update.status = status;
+        if (notes !== undefined) update.notes = notes || null;
+        if (priceGiven) update.price = Number(price) || 0;
+        if (periodStart !== undefined) update.periodStart = periodStart ? new Date(periodStart) : null;
+        if (periodEnd !== undefined) update.periodEnd = periodEnd ? new Date(periodEnd) : null;
+
+        const create: Prisma.SubscriptionUncheckedCreateInput = {
+          schoolId,
+          plan: 'YEARLY',
+          status: status || 'ACTIVE',
+          notes: notes || null,
+          ...(priceGiven ? { price: Number(price) || 0 } : {}),
+          ...(periodStart ? { periodStart: new Date(periodStart) } : {}),
+          ...(periodEnd ? { periodEnd: new Date(periodEnd) } : {}),
+        };
+
+        const sub = await db.subscription.upsert({ where: { schoolId }, update, create });
+        await logAudit({ action: 'SUBSCRIPTION_UPDATE', category: 'SETTINGS', severity: sub.status === 'ACTIVE' ? 'INFO' : 'WARNING', userId: auth.userId, username: auth.username, role: auth.role, ip, schoolId, details: `Langganan sekolah ${sub.id}: ${sub.status}` });
         return NextResponse.json({ message: 'Langganan diperbarui', subscription: sub });
       }
       if (action === 'renew') {

@@ -42,13 +42,25 @@ export async function POST(request: NextRequest) {
 
     switch (type) {
       case 'students':
+        // Isolation: an explicit target class must belong to the school this
+        // actor is acting for, otherwise a school-B admin could file imported
+        // students into school-A's class and inherit its roster.
+        if (classId && scope.schoolId) {
+          const ownedClass = await db.class.findFirst({
+            where: { id: classId, schoolId: scope.schoolId },
+            select: { id: true },
+          });
+          if (!ownedClass) {
+            return NextResponse.json({ error: 'Kelas tidak ditemukan di sekolah Anda' }, { status: 404 });
+          }
+        }
         const result = await importStudents(rows, classId, academicYearId, scope, auth);
         imported = result.imported;
         errors = result.errors;
         schoolsCreated = result.schoolsCreated;
         break;
       case 'users':
-        const userResult = await importUsers(rows, scope?.schoolId);
+        const userResult = await importUsers(rows, scope);
         imported = userResult.imported;
         errors = userResult.errors;
         break;
@@ -114,9 +126,11 @@ async function resolveImportSchool(
   }
 
   if (!normalized) {
-    // Actor's own school; SUPER_ADMIN without a school falls back to the first school.
+    // Actor's own school. Only a SUPER_ADMIN outside preview mode may fall back
+    // to "the first school": for anyone else a missing binding must be an error,
+    // not a silent write into whichever school happens to be oldest.
     let schoolId = scope.schoolId;
-    if (!schoolId) {
+    if (!schoolId && scope.isSuperAdmin) {
       const defaultSchool = await db.school.findFirst({ orderBy: { createdAt: 'asc' } });
       schoolId = defaultSchool ? defaultSchool.id : null;
     }
@@ -338,8 +352,9 @@ async function importStudents(rows: Record<string, any>[], classId?: string, aca
   return { imported, errors, schoolsCreated };
 }
 
-async function importUsers(rows: Record<string, any>[], actorSchoolId?: string | null) {
+async function importUsers(rows: Record<string, any>[], scope: ImportScope) {
   let imported = 0;
+  const actorSchoolId = scope.schoolId;
   const errors: string[] = [];
 
   for (const row of rows) {
@@ -370,8 +385,8 @@ async function importUsers(rows: Record<string, any>[], actorSchoolId?: string |
       }
 
       // Resolve school (multi-tenant). Empty school code -> the actor's school
-      // (falls back to the first school by creation order) so plain uploads
-      // keep working and never cross schools.
+      // (SUPER_ADMIN outside preview falls back to the first school by creation
+      // order) so plain uploads keep working and never cross schools.
       let schoolId: string | null = null;
       if (schoolCode) {
         const school = await db.school.findUnique({ where: { code: schoolCode } });
@@ -379,18 +394,35 @@ async function importUsers(rows: Record<string, any>[], actorSchoolId?: string |
           errors.push(`${name}: Kode sekolah "${schoolCode}" tidak ditemukan`);
           continue;
         }
+        // Isolation, as in the student importer: a school-bound actor — including
+        // a SUPER_ADMIN previewing a school — can only import into that school.
+        if (scope.schoolId && school.id !== scope.schoolId) {
+          errors.push(`${name}: Kode sekolah "${schoolCode}" milik sekolah lain`);
+          continue;
+        }
         schoolId = school.id;
       } else {
         schoolId = actorSchoolId ?? null;
-        if (!schoolId) {
+        if (!schoolId && scope.isSuperAdmin) {
           const defaultSchool = await db.school.findFirst({ orderBy: { createdAt: 'asc' } });
           schoolId = defaultSchool ? defaultSchool.id : null;
+        }
+        if (!schoolId) {
+          errors.push(`${name}: Akun ini tidak terhubung ke sekolah mana pun`);
+          continue;
         }
       }
 
       // Check if user exists
       const existing = await db.user.findUnique({ where: { username } });
       if (existing) {
+        // An import must not rewrite an account outside the actor's school: this
+        // branch sets `role` and `schoolId` from a spreadsheet, so without the
+        // check a bulk upload could re-role or re-home another tenant's user.
+        if (scope.schoolId && existing.schoolId !== scope.schoolId) {
+          errors.push(`${name}: Username "${username}" milik sekolah lain`);
+          continue;
+        }
         await db.user.update({
           where: { username },
           data: { name, role: normalizedRole, schoolId },

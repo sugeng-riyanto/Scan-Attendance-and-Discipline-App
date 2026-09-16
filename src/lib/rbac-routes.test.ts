@@ -8,9 +8,12 @@
  * to return 401/403. This works correctly outside the test runner.
  * To verify RBAC outside bun test: bun -e "<inline test script>"
  */
-import { describe, expect, it } from 'bun:test'
+import { afterAll, describe, expect, it } from 'bun:test'
 
 const BASE = 'http://localhost:3000'
+
+/** The account the POST /api/users sweep really creates (see afterAll). */
+const SWEEP_USERNAME = 'rbact'
 
 const ACCOUNTS: Record<string, { password: string; role: string }> = {
   superadmin: { password: 'superadmin123', role: 'SUPER_ADMIN' },
@@ -132,3 +135,25 @@ for (const [username, account] of Object.entries(ACCOUNTS)) {
     }
   })
 }
+
+// ─── Cleanup ───
+// The sweep above carries a real POST /api/users body, so whichever iteration
+// gets through actually creates the account — and the DELETE endpoint only
+// *deactivates*, so it survived every suite run as an unbound GURU and skewed
+// the demo user counts. Remove it through the platform action instead.
+// (URL-prefixed on purpose: the rest of this endpoint is covered elsewhere.)
+afterAll(async () => {
+  const token = await getToken('superadmin')
+  if (!token) return
+  const headers = { Cookie: `token=${token}` }
+  const list = await fetch(`${BASE}/api/super-admin?resource=users`, { headers }).catch(() => null)
+  if (!list?.ok) return
+  const { users } = await list.json().catch(() => ({ users: [] }))
+  const created = (users || []).find((u: any) => u.username === SWEEP_USERNAME)
+  if (!created) return
+  await fetch(`${BASE}/api/super-admin`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource: 'users', action: 'delete', id: created.id }),
+  }).catch(() => null)
+})

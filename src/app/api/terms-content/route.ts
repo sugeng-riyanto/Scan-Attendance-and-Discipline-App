@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
 // Allowed editors: SUPER_ADMIN (always via requireRole), ADMIN, KEPALA_SEKOLAH
@@ -45,11 +46,13 @@ export async function GET(request: NextRequest) {
       });
       const currentVersion = activeTerms?.version ?? 0;
 
-      // Build where clause: same-school users only (unless super admin without school scope)
-      const where: any = { isActive: true };
-      if (auth.role !== 'SUPER_ADMIN' && (auth as any).schoolId) {
-        where.schoolId = (auth as any).schoolId;
-      }
+      // Build where clause: same-school users only. The JWT carries only
+      // userId/username/role, so the school must be resolved from the user's
+      // account — getSchoolScope does that, honors SUPER_ADMIN preview mode,
+      // and denies by default (`{ id: null }`) for a user with no school
+      // binding instead of silently returning every school's users.
+      const scope = await getSchoolScope(auth);
+      const where: any = { isActive: true, ...scope.schoolWhere };
 
       const users = await db.user.findMany({
         where,

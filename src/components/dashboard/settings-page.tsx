@@ -188,6 +188,10 @@ function SiswaSettings({ themeColor }: { themeColor: string }) {
 
   const handleSave = async () => {
     if (!form.nisn || !form.name || !form.classId) { toast.error('NISN, Name, and Class are required'); return }
+    // No HP is marked with a red * and is enforced by POST /api/students for new
+    // students. Existing students without one stay editable, so the check only
+    // applies on create.
+    if (!editId && !form.phone.trim()) { toast.error('No HP is required for a new student'); return }
     try {
       if (editId) {
         await apiFetch('/api/students', {

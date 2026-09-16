@@ -133,9 +133,15 @@ export async function POST(request: NextRequest) {
 
     if (action === 'reminder') {
       const reminderEnabled = !!body.reminderEnabled;
-      const reminderType = body.reminderType === 'CHECK_OUT' ? 'CHECK_OUT' : 'CHECK_IN';
-      const reminderLevel = body.reminderLevel === 'SHS' ? 'SHS' : 'JHS';
-      await db.user.update({ where: { id: user.id }, data: { reminderEnabled, reminderType, reminderLevel } });
+      // Type and level are only written when the request names them — flipping
+      // the switch on its own must not reset a stored CHECK_OUT/SHS preference
+      // back to the CHECK_IN/JHS defaults.
+      const reminderType = body.reminderType === undefined ? undefined : (body.reminderType === 'CHECK_OUT' ? 'CHECK_OUT' : 'CHECK_IN');
+      const reminderLevel = body.reminderLevel === undefined ? undefined : (body.reminderLevel === 'SHS' ? 'SHS' : 'JHS');
+      await db.user.update({
+        where: { id: user.id },
+        data: { reminderEnabled, ...(reminderType ? { reminderType } : {}), ...(reminderLevel ? { reminderLevel } : {}) },
+      });
       await logAudit({ action: reminderEnabled ? 'REMINDER_ENABLED' : 'REMINDER_DISABLED', category: 'ACCOUNT', severity: 'INFO', userId: user.id, username: user.username, role: user.role, ip, details: `Reminder ${reminderType === 'CHECK_IN' ? 'check-in' : 'check-out'} (${reminderLevel})` });
       return NextResponse.json({ message: 'Preferensi pengingat disimpan', reminderEnabled, reminderType, reminderLevel });
     }

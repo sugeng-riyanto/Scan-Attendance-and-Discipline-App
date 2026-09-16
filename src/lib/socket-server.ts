@@ -28,6 +28,11 @@ function ensureSocket(): Socket | null {
   if (socket) return socket
 
   socket = io(SOCKET_SERVER_URL, {
+    // Proves to the mini-service that this connection is the trusted relay
+    // rather than a browser. Only token holders are allowed to emit; with no
+    // token (or a mismatch) every event is refused and dashboards stop
+    // live-updating, so both sides must share SOCKET_RELAY_TOKEN.
+    auth: { token: process.env.SOCKET_RELAY_TOKEN },
     // Polling only: the websocket transport's `ws` wiring breaks when
     // engine.io-client is bundled by Turbopack for the server runtime
     // (connect_error: websocket error, under Bun). Polling is plain HTTP
