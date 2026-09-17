@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuthStore } from '@/lib/stores/auth-store'
 import { formatDateShort, getViolationLevelColor, roleLabels } from '@/lib/attendance-utils'
+import { ADMIN_ONLY, SITE_LEADS, hasRole } from '@/lib/rbac-policy'
 import { generateQRString } from '@/lib/qr-utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -1518,8 +1519,10 @@ function LanggananSettings({ themeColor }: { themeColor: string }) {
 
 export function SettingsPage({ themeColor }: { themeColor: string }) {
   const { user } = useAuthStore()
-  const isAdmin = user?.role === 'ADMIN'
-  const isSchoolLeader = isAdmin || user?.role === 'KEPALA_SEKOLAH'
+  // Plain membership on purpose: a Super Admin is not a school ADMIN here — it
+  // browses the platform panel instead (see src/lib/rbac-policy.ts hasRole).
+  const isAdmin = hasRole(user?.role, ADMIN_ONLY)
+  const isSchoolLeader = hasRole(user?.role, SITE_LEADS)
   const defaultTab = isAdmin ? 'school' : 'account'
   return (
     <div className="space-y-4">

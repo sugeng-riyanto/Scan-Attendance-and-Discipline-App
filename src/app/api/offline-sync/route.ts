@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { getBehaviorLevel } from '@/lib/attendance-utils';
 
@@ -22,7 +23,6 @@ interface SyncResult {
 
 // ─── POST: Sync offline queued data ─────────────────────────────────────────
 
-const SYNC_ROLES = ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
 
 export async function POST(request: NextRequest) {
   const result: SyncResult = { synced: 0, failed: 0, errors: [] };
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, SYNC_ROLES)) {
+    if (!canAccessApi(auth.role, 'POST /api/offline-sync')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, SYNC_ROLES)) {
+    if (!canAccessApi(auth.role, 'GET /api/offline-sync')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);

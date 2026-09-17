@@ -15,8 +15,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Search, ScanLine, Camera, User, CheckCircle, AlertTriangle, ArrowLeft, RefreshCw, PenLine, Lock, LogIn, GraduationCap, ClipboardList, Home } from 'lucide-react'
 import { Student, CategoryInfo, CategoriesResponse } from '@/components/dashboard/types'
+import { canAccessApi } from '@/lib/rbac-policy'
 
-const ALLOWED_ROLES = ['ADMIN','KEPALA_SEKOLAH','VP_KESISWAAN','WALI_KELAS','GURU','GURU_JAGA']
+/** Whoever may run a scan session may use this page (src/lib/rbac-policy.ts). */
+const mayScan = (role: string) => canAccessApi(role, 'POST /api/scan-session')
 
 export default function ScanDisciplinePage() {
   const [authState, setAuthState] = useState<'loading' | 'login' | 'ok'>('loading')
@@ -56,7 +58,7 @@ export default function ScanDisciplinePage() {
   // Check auth on mount
   useEffect(() => {
     fetch('/api/auth').then(r => r.json()).then(data => {
-      if (data.user && ALLOWED_ROLES.includes(data.user.role)) {
+      if (data.user && mayScan(data.user.role)) {
         setCurrentUserId(data.user.id)
         setCurrentUserRole(data.user.role)
         setAuthState('ok')
@@ -85,7 +87,7 @@ export default function ScanDisciplinePage() {
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Login gagal') }
       const data = await res.json()
-      if (!ALLOWED_ROLES.includes(data.user.role)) {
+      if (!mayScan(data.user.role)) {
         throw new Error('Akun ini tidak memiliki akses ke halaman ini')
       }
       setCurrentUserId(data.user.id)

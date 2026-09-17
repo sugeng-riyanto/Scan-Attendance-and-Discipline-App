@@ -2,6 +2,8 @@
 // Time rules: Before 07:00 WIB = On Time (Hadir), After 07:00 = Late (Terlambat)
 // Dismissal: SMP at 14:50, SMA at 15:30
 
+import { ROLE_LABELS } from '@/lib/rbac-policy'
+
 export const CHECKIN_CUTOFF_HOUR = 7;
 export const CHECKIN_CUTOFF_MINUTE = 0;
 export const SMP_DISMISSAL_HOUR = 14;
@@ -132,17 +134,8 @@ export function getViolationLevelColor(level: string): string {
 /**
  * Role display names in English
  */
-export const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'Super Admin',
-  ADMIN: 'School Administrator',
-  KEPALA_SEKOLAH: 'Principal',
-  VP_KESISWAAN: 'Vice Principal of Student Affairs',
-  WALI_KELAS: 'Homeroom Teacher',
-  GURU: 'Faculty Teacher',
-  GURU_JAGA: 'Duty Teacher',
-  ORANG_TUA: 'Parent/Guardian',
-  SISWA: 'Student',
-};
+/** Display names for every role — owned by the RBAC policy, re-exported here. */
+export const roleLabels: Record<string, string> = { ...ROLE_LABELS };
 
 /**
  * Permission type labels

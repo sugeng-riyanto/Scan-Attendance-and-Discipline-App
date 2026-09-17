@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { emitSocketEvent } from '@/lib/socket-server';
 
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'WALI_KELAS', 'VP_KESISWAAN', 'ORANG_TUA', 'SISWA'])) {
+    if (!canAccessApi(auth.role, 'GET /api/permissions')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'WALI_KELAS', 'ORANG_TUA', 'SISWA'])) {
+    if (!canAccessApi(auth.role, 'POST /api/permissions')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
@@ -144,7 +145,7 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'WALI_KELAS', 'VP_KESISWAAN'])) {
+    if (!canAccessApi(auth.role, 'PUT /api/permissions')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
@@ -222,7 +223,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN'])) {
+    if (!canAccessApi(auth.role, 'DELETE /api/permissions')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);

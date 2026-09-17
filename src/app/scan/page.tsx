@@ -6,6 +6,7 @@ import Webcam from 'react-webcam'
 import { toast } from 'sonner'
 import { Toaster as SonnerToaster } from '@/components/ui/sonner'
 import { ShiftGateBadge } from '@/components/shared/shift-gate-badge'
+import { canAccessApi } from '@/lib/rbac-policy'
 import { ThemeToggle } from '@/components/theme-toggle'
 import {
   ScanLine, Camera, UserCheck, AlertCircle, CheckCircle, AlertTriangle, Clock, MapPin,
@@ -714,8 +715,7 @@ export default function PublicScanPage() {
         return
       }
 
-      const allowedRoles = ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA']
-      if (!allowedRoles.includes(authData.user.role)) {
+      if (!canAccessApi(authData.user.role, 'POST /api/scan-session')) {
         toast.error('Anda tidak memiliki akses untuk mengubah status scan')
         return
       }

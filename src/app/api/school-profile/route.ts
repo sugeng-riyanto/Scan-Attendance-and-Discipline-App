@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
@@ -29,7 +30,8 @@ function clean(v: unknown): string | null {
 async function authorize(request: NextRequest): Promise<{ scope: Awaited<ReturnType<typeof getSchoolScope>>; auth: NonNullable<ReturnType<typeof getAuthUser>> } | NextResponse> {
   const auth = getAuthUser(request);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH'])) {
+  // Reading and editing the school profile carry the same right.
+  if (!canAccessApi(auth.role, 'GET /api/school-profile')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   const scope = await getSchoolScope(auth);

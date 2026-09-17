@@ -1,22 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole, hashPassword } from '@/lib/auth-utils';
+import { getAuthUser, hashPassword } from '@/lib/auth-utils';
 import { getSchoolScope, type SchoolScope } from '@/lib/school-scope';
 import { lockoutGuard } from '@/lib/user-lockout';
+import { canAccessApi, type ApiRoute } from '@/lib/rbac-policy';
 
-async function checkAuth(request: NextRequest, allowedRoles: string[]) {
+async function checkAuth(request: NextRequest, route: ApiRoute) {
   const auth = getAuthUser(request);
   if (!auth) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  if (!requireRole(auth.role, allowedRoles)) {
+  if (!canAccessApi(auth.role, route)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   return auth;
 }
-
-const ADMIN_ROLES = ['ADMIN'];
-const STAFF_ROLES = ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
 
 /**
  * Per-school isolation for account writes.
@@ -38,7 +36,7 @@ async function findManageableUser(id: string, scope: SchoolScope) {
 }
 
 export async function GET(request: NextRequest) {
-  const authErr = await checkAuth(request, STAFF_ROLES);
+  const authErr = await checkAuth(request, 'GET /api/users');
   if (authErr instanceof NextResponse) return authErr;
 
   try {
@@ -91,7 +89,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authErr = await checkAuth(request, ADMIN_ROLES);
+  const authErr = await checkAuth(request, 'POST /api/users');
   if (authErr instanceof NextResponse) return authErr;
 
   try {
@@ -172,7 +170,10 @@ export async function PUT(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'ID diperlukan' }, { status: 400 });
 
     const isSelf = auth.userId === id;
-    const isAdmin = requireRole(auth.role, ADMIN_ROLES);
+    // 'PUT /api/users' is not a gate here but the policy's answer to "may manage
+    // accounts": the handler is self-service, and this flag is what additionally
+    // allows editing someone else (and what gates role / schoolId / isActive).
+    const isAdmin = canAccessApi(auth.role, 'PUT /api/users');
 
     // Only ADMIN can update other users; non-admins can only update themselves.
     if (!isSelf && !isAdmin) {
@@ -266,7 +267,7 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const authErr = await checkAuth(request, ADMIN_ROLES);
+  const authErr = await checkAuth(request, 'DELETE /api/users');
   if (authErr instanceof NextResponse) return authErr;
 
   try {

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { Toaster as SonnerToaster } from '@/components/ui/sonner'
 import { useSocketEvent } from '@/lib/socket-client'
 import { SchoolConfigType } from '@/lib/types'
+import { canAccessPage } from '@/lib/rbac-policy'
 import { Sidebar } from './sidebar'
 import { HeaderBar } from './header-bar'
 import { BottomNav } from './bottom-nav'
@@ -113,10 +114,15 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
   if (!user) return null
 
   const renderPage = () => {
+    // One gate for every page: the same policy that builds the menu decides what
+    // may render, so a page can't be reachable by URL/state without a menu entry
+    // (src/lib/rbac-policy.ts). Pages outside the policy fall through to their
+    // own `case`, and an unknown one to the default below.
+    if (!canAccessPage(user.role, activePage)) return <AdminDashboard />
+
     switch (activePage) {
       case 'super-admin':
-        if (user.role === 'SUPER_ADMIN') return <SuperAdminPage themeColor={themeColor} />
-        return <AdminDashboard />
+        return <SuperAdminPage themeColor={themeColor} />
       case 'dashboard':
         switch (user.role) {
           case 'SUPER_ADMIN':
@@ -146,15 +152,9 @@ export function MainApp({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
       case 'school-documents': return <SchoolDocumentsPage />
       case 'terms': return <TermsPage user={user} />
       case 'guide': return <GuidePage user={user} />
-      case 'audit-logs':
-        if (user.role === 'ADMIN' || user.role === 'KEPALA_SEKOLAH') return <AuditLogsPage />
-        return <AdminDashboard />
-      case 'data-rights':
-        if (user.role === 'ADMIN' || user.role === 'KEPALA_SEKOLAH') return <DataRightsPage />
-        return <AdminDashboard />
-      case 'security':
-        if (user.role === 'ADMIN' || user.role === 'KEPALA_SEKOLAH') return <SecurityPage />
-        return <AdminDashboard />
+      case 'audit-logs': return <AuditLogsPage />
+      case 'data-rights': return <DataRightsPage />
+      case 'security': return <SecurityPage />
       case 'duty-schedule':
         if (user.role === 'VP_KESISWAAN') return <DutyScheduleManager />
         return <DutyScheduleWidget userId={user.id} role={user.role} />

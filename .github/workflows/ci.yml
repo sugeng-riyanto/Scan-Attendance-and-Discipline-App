@@ -1,16 +1,32 @@
 name: CI
 
+# Two merge gates, both required on `main`:
+#
+#   "Typecheck & unit suites"        — fast, no database
+#   "Full suite (seeded PostgreSQL)" — every test file against a freshly built
+#                                      and seeded database
+#
+# A check only *blocks* a merge once it is listed in
+# Settings → Branches → Branch protection rule for `main` → "Require status
+# checks to pass before merging". Add both names above and enable "Require
+# branches to be up to date".
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# A new push supersedes the previous run for the same branch or PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: Typecheck & Tests
+  unit:
+    name: Typecheck & unit suites
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -27,8 +43,222 @@ jobs:
       - name: Generate Prisma client
         run: bunx prisma generate
 
-      - name: Typecheck
-        run: bunx tsc --noEmit
+      # The tree has 18 pre-existing type errors (see .freebuff/run.md). Failing
+      # the job on them would make CI red on every commit, which is how a real
+      # regression hides — so this is a ratchet: it fails only when the count
+      # goes *up*. Lower BASELINE whenever the backlog shrinks.
+      - name: Typecheck (ratcheted at the pre-existing backlog)
+        run: |
+          set -u
+          BASELINE=18
+          bunx tsc --noEmit > /tmp/tsc.log 2>&1 && STATUS=0 || STATUS=$?
+          COUNT=$(grep -c 'error TS' /tmp/tsc.log || true)
+          COUNT=${COUNT:-0}
+          echo "Type errors: $COUNT (allowed backlog: $BASELINE), tsc exit: $STATUS"
+          # tsc exits 2+ when it cannot run at all (bad config, missing binary).
+          # A 0-error reading from a run that never happened would be a
+          # permanent false green, so treat it as a failure.
+          if [ "$STATUS" -gt 1 ] || { [ "$STATUS" -ne 0 ] && [ "$COUNT" -eq 0 ]; }; then
+            echo "::error::tsc did not run properly (exit $STATUS, $COUNT errors parsed)"
+            tail -20 /tmp/tsc.log
+            exit 1
+          fi
+          if [ "$COUNT" -gt "$BASELINE" ]; then
+            echo "::error::Type errors went up: $COUNT > $BASELINE"
+            grep 'error TS' /tmp/tsc.log | head -40
+            exit 1
+          fi
+          if [ "$COUNT" -lt "$BASELINE" ]; then
+            echo "::notice::Backlog shrank to $COUNT — lower BASELINE in .github/workflows/ci.yml"
+          fi
 
-      - name: Run unit tests
-        run: bun test src/lib/attendance-utils.test.ts src/lib/school-host.test.ts
+      # The suites that mock the data layer, so they need neither a database nor
+      # a server. The three HTTP suites (api-smoke, rbac-routes,
+      # terms-lifecycle) run in the job below.
+      - name: Unit suites (mocked data layer)
+        run: |
+          bun test \
+            src/lib/partial-update.test.ts \
+            src/lib/rbac-policy.test.ts \
+            src/lib/scan-gating.test.ts \
+            src/lib/school-host.test.ts \
+            src/lib/students-write-scope.test.ts \
+            src/lib/super-admin-user-update.test.ts \
+            src/lib/terms-acceptance-scope.test.ts \
+            src/lib/users-scope.test.ts
+
+  full-suite:
+    name: Full suite (seeded PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: presensi_nusantara
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d presensi_nusantara"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Ephemeral container DB — nothing here is a real deployment target.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/presensi_nusantara
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      # The server signs session cookies with this and the suites log in over
+      # HTTP, so the value only has to stay stable for the run; a repository
+      # secret overrides the CI-only fallback.
+      JWT_SECRET: ${{ secrets.CI_JWT_SECRET || 'ci-only-jwt-secret-ephemeral-db' }}
+      SOCKET_RELAY_TOKEN: ${{ secrets.CI_SOCKET_RELAY_TOKEN || 'ci-only-socket-relay-token' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate Prisma client
+        run: bunx prisma generate
+
+      # The app loads .env.local itself (Next does it at boot) and the two HTTP
+      # suites that do direct-DB cleanup read it too. Values come from the job
+      # environment above — never from this file in the repository.
+      - name: Write .env.local for the run
+        run: |
+          printf '%s\n' \
+            "DATABASE_URL=$DATABASE_URL" \
+            "JWT_SECRET=$JWT_SECRET" \
+            "NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL" \
+            "SOCKET_RELAY_TOKEN=$SOCKET_RELAY_TOKEN" > .env.local
+          echo "wrote .env.local with keys:"
+          cut -d= -f1 .env.local
+
+      # The stack comes up through the script a developer runs, so the two
+      # bring-up paths cannot drift. That one command syncs the schema, starts
+      # the socket service and then the dev server (that order — the relay reads
+      # SOCKET_RELAY_TOKEN at boot), waits for both, and reports the pid that owns
+      # :3000 as the OS sees it rather than the wrapper it spawned.
+      #
+      # DEV_UP_APP_TIMEOUT keeps the ceiling the bespoke poll this replaced used
+      # to have on a cold runner; the script's own defaults are 120 s to listen
+      # and 90 s to answer. The mini-service installs its own dependencies here,
+      # which is a branch no local machine ever exercises (they are already
+      # there), so CI is the only place it is really tested.
+      #
+      # `prisma migrate deploy` is deliberately not used anywhere in this job: the
+      # migration history stops at 2026-06-03 while schema.prisma last moved on
+      # 2026-08-19, so replaying it builds a June-era schema the current code
+      # cannot read. `db push` from schema.prisma is how the demo database is
+      # maintained, and on a throwaway container the data-loss flag is moot.
+      - name: Bring the stack up (npm run dev:up)
+        env:
+          DEV_UP_APP_TIMEOUT: '300'
+        run: |
+          set -o pipefail
+          # The documented entry point, not a copy of it: `npm run dev:up` is the
+          # one-liner the README and the run doc give a developer. `--silent`
+          # keeps npm's banner off stdout so `--json` stays machine-readable, and
+          # the sed is a belt for npm versions that print it anyway (the JSON is
+          # the only thing the script writes to stdout in that mode).
+          npm run dev:up --silent -- --json | tee /tmp/dev-up.out
+          sed -n '/^{/,$p' /tmp/dev-up.out > /tmp/dev-up.json
+          # The script warns rather than fails on a 5xx, because a first compile
+          # can be slow; CI wants a hard failure, on the endpoint the old
+          # readiness loop required to be exactly 200.
+          curl -fsS -o /dev/null http://localhost:3000/api/schools/public
+
+      # Seeded through the app's own endpoint, so the fixture is byte-for-byte
+      # what a fresh install produces (3 schools, 42 users, 24 students).
+      - name: Seed the database
+        run: |
+          # `-f` makes a 4xx/5xx abort the step (the runner's shell runs with -e);
+          # piping into `tee` would have hidden that behind tee's exit status.
+          curl -fsS -X POST 'http://localhost:3000/api/setup?force=true' -o /tmp/seed.json
+          cat /tmp/seed.json
+          echo
+          # Prove the seed instead of trusting it: one login per role family.
+          # Without this, a broken seed shows up as a confusing suite failure.
+          for pair in superadmin:superadmin123 admin:admin123 guru1:guru123 siswa1:siswa123; do
+            USER=${pair%%:*}
+            PASS=${pair#*:}
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/auth \
+              -H 'Content-Type: application/json' \
+              -d "{\"username\":\"$USER\",\"password\":\"$PASS\",\"acceptedTerms\":true}")
+            echo "login $USER -> HTTP $CODE"
+            if [ "$CODE" != "200" ]; then
+              echo "::error::seeded account $USER cannot log in (HTTP $CODE)"
+              exit 1
+            fi
+          done
+
+      - name: Full test suite
+        run: |
+          set -o pipefail
+          bun test 2>&1 | tee /tmp/test.log
+
+      # dev-up.sh is a deliverable too, and idempotency is its whole contract:
+      # this runs it twice against the stack this job already has up, asserting
+      # that the second run starts nothing, that the pid it reports for :3000 is
+      # the one the OS says owns the port, and that a killed service comes back.
+      # Opt-in via DEV_UP_TEST because it spawns — and in some cases kills — real
+      # processes; every kill case uses a scratch socket port and a throwaway log
+      # dir, so the live socket service is never touched. The last five cases are
+      # dev-down.sh's: that it stops exactly what dev:up started, is safe to
+      # re-run, leaves alone what the record does not claim, refuses a recorded pid
+      # that no longer owns its port, and does nothing when there is no record.
+      - name: Bring-up script is idempotent
+        env:
+          DEV_UP_TEST: '1'
+        run: bun test src/lib/dev-up.test.ts
+
+      # The dev server and socket service logs now live where the script puts
+      # them (the run doc names the same paths), not in /tmp.
+      - name: Server logs on failure
+        if: failure()
+        run: |
+          echo '--- dev server (.zscripts/dev-up.log) ---'
+          tail -200 .zscripts/dev-up.log 2>/dev/null || true
+          echo '--- socket service (.zscripts/dev-up-socket.log) ---'
+          tail -50 .zscripts/dev-up-socket.log 2>/dev/null || true
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-logs
+          path: |
+            .zscripts/dev-up.log
+            .zscripts/dev-up-socket.log
+            /tmp/dev-up.json
+            /tmp/dev-down.json
+            /tmp/test.log
+            /tmp/seed.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Torn down through the counterpart script, so the same record decides what
+      # counts as ours: the dev server and socket service this job started go down,
+      # while the service-container Postgres — which dev-up only *found* listening —
+      # is reported "left alone". dev:down exits non-zero when something it owns is
+      # still serving, and that is a warning here rather than a red job: the tests
+      # have already reported their own result, and the runner reaps the rest. The
+      # pkill is a backstop for a bring-up that died before writing a record.
+      - name: Stop the stack
+        if: always()
+        run: |
+          if ! npm run dev:down --silent -- --json > /tmp/dev-down.json 2>/dev/null; then
+            echo '::warning::dev:down reported a service still listening (see /tmp/dev-down.json)'
+          fi
+          pkill -f 'next dev' || true

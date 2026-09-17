@@ -13,6 +13,7 @@ import { useAppStore } from '@/lib/stores/app-store'
 import { usePreviewStore } from '@/lib/stores/preview-store'
 import { roleLabels } from '@/lib/attendance-utils'
 import { NAV_ITEMS } from './nav-config'
+import { canAccessPage } from '@/lib/rbac-policy'
 
 interface DemoAccount {
   username: string
@@ -74,7 +75,7 @@ export function RoleSwitcher() {
   }
 
   const getRolePages = (role: string) => {
-    return NAV_ITEMS.filter(item => item.roles.includes(role)).map(item => item.label)
+    return NAV_ITEMS.filter(item => canAccessPage(role, item.id)).map(item => item.label)
   }
 
   // Only show for Super Admin

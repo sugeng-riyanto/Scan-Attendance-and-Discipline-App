@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 
-const FACE_ROLES = ['ADMIN', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
 const MAX_CAPTURES_PER_STUDENT = 5;
 const MIN_CAPTURES_FOR_BASIC_ACCURACY = 3;
 
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, FACE_ROLES)) {
+    if (!canAccessApi(auth.role, 'GET /api/face-references')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, FACE_ROLES)) {
+    if (!canAccessApi(auth.role, 'POST /api/face-references')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
@@ -270,7 +270,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, FACE_ROLES)) {
+    if (!canAccessApi(auth.role, 'DELETE /api/face-references')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();

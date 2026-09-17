@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { AUDIT_SOLUTIONS, AUDIT_CATEGORY_LABELS } from '@/lib/audit';
 
@@ -9,7 +10,7 @@ export async function GET(request: NextRequest) {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     // Admin & Kepala Sekolah monitor users (JHS dan SHS) — per UU PDP / T&C.
-    if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH'])) {
+    if (!canAccessApi(auth.role, 'GET /api/audit-logs')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH'])) {
+    if (!canAccessApi(auth.role, 'POST /api/audit-logs')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

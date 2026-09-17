@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 
-const GET_ROLES = ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
-const POST_ROLES = ['VP_KESISWAAN'];
 
 export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, GET_ROLES)) {
+    if (!canAccessApi(auth.role, 'GET /api/duty-schedule')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);
@@ -45,7 +44,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, POST_ROLES)) {
+    if (!canAccessApi(auth.role, 'POST /api/duty-schedule')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { dayOfWeek, startTime, endTime, teacherId, location, tasks } = await request.json();

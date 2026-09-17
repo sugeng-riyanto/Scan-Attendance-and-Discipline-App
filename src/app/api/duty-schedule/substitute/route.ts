@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 
-const ROLES = ['VP_KESISWAAN'];
 
 export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ROLES)) {
+    if (!canAccessApi(auth.role, 'POST /api/duty-schedule/substitute')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { dutyScheduleId, substituteTeacherId, originalTeacherId, substituteDate, reason } = await request.json();
@@ -46,7 +46,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ROLES)) {
+    if (!canAccessApi(auth.role, 'DELETE /api/duty-schedule/substitute')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);

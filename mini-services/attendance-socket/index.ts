@@ -1,7 +1,12 @@
 import { Server } from 'socket.io';
 import { timingSafeEqual } from 'node:crypto';
 
-const PORT = 3003;
+// The port the Next server's relay dials (SOCKET_SERVER_URL, default :3003).
+// SOCKET_PORT overrides it so a second, scratch instance can run beside a live
+// one — .zscripts/dev-up.sh passes the port it is about to probe. Deliberately
+// not the ambient PORT: that one belongs to the Next app, and inheriting it
+// would make this service fight the app for its own port.
+const PORT = Number(process.env.SOCKET_PORT) || 3003;
 
 // Shared secret between the Next.js server relay (src/lib/socket-server.ts) and
 // this service. Only a client that presents it may emit: browsers connect

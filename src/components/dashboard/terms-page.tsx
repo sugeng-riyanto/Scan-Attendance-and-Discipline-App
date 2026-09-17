@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { AuthUser, useAuthStore } from '@/lib/stores/auth-store'
 import { roleLabels } from '@/lib/attendance-utils'
+import { canAccessApi } from '@/lib/rbac-policy'
 import { apiFetch } from '@/lib/api-fetch'
 import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
 import { toast } from 'sonner'
@@ -32,8 +33,6 @@ interface AcceptanceUser {
   id: string; name: string; username: string; role: string
   acceptedVersion: number | null; acceptedAt: string | null; isUpToDate: boolean
 }
-
-const EDIT_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'KEPALA_SEKOLAH'])
 
 /** Default T&C content used when the DB has no record yet */
 const DEFAULT_BODY = `1. Dasar Hukum
@@ -122,7 +121,8 @@ function renderBody(text: string) {
 }
 
 export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: boolean }) {
-  const canEdit = !publicView && EDIT_ROLES.has(user.role)
+  // Editing T&C is the same right that gates POST /api/terms-content.
+  const canEdit = !publicView && canAccessApi(user.role, 'POST /api/terms-content')
 
   const [terms, setTerms] = useState<TermsRecord | null>(null)
   const [loading, setLoading] = useState(true)

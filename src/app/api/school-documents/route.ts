@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,7 +14,9 @@ export async function GET(request: NextRequest) {
     const where: any = {};
     if (type) where.type = type;
 
-    const isAdminOrVpkes = requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN']);
+    // Anyone in the school may read the library; only the document managers see
+    // unpublished drafts, which is the same right that lets them write one.
+    const isAdminOrVpkes = canAccessApi(auth.role, 'POST /api/school-documents');
     if (!isAdminOrVpkes) where.isPublished = true;
 
     const documents = await db.schoolDocument.findMany({
@@ -32,7 +35,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN'])) {
+    if (!canAccessApi(auth.role, 'POST /api/school-documents')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -75,7 +78,7 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN'])) {
+    if (!canAccessApi(auth.role, 'PUT /api/school-documents')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -119,7 +122,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN'])) {
+    if (!canAccessApi(auth.role, 'DELETE /api/school-documents')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

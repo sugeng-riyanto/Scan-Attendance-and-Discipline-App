@@ -54,26 +54,7 @@ export function getAuthUser(request: NextRequest): JwtPayload | null {
   return verifyToken(token);
 }
 
-export const rolePermissions: Record<string, string[]> = {
-  SUPER_ADMIN: ['all'],
-  ADMIN: ['all'],
-  KEPALA_SEKOLAH: ['view_all', 'view_statistics', 'view_escalation', 'manage_alerts'],
-  VP_KESISWAAN: ['view_all', 'view_discipline', 'manage_violations', 'manage_good_deeds', 'view_escalation', 'manage_categories'],
-  WALI_KELAS: ['view_own_class', 'manage_violations', 'manage_good_deeds', 'view_class_attendance', 'manage_permissions', 'manage_own_class_data'],
-  GURU: ['view_assigned_classes', 'manage_violations', 'manage_good_deeds', 'record_attendance'],
-  GURU_JAGA: ['view_all_attendance', 'monitor_attendance', 'record_attendance', 'export_reports'],
-  ORANG_TUA: ['view_own_child', 'request_permission'],
-  SISWA: ['view_own_data'],
-};
-
-export function hasPermission(role: string, permission: string): boolean {
-  const perms = rolePermissions[role] || [];
-  return perms.includes('all') || perms.includes(permission);
-}
-
-export function requireRole(role: string, allowedRoles: string[]): boolean {
-  // SUPER_ADMIN is the multi-tenant administrator: it can access every role's
-  // pages and APIs (per-school isolation still limits what data it mutates).
-  if (role === 'SUPER_ADMIN') return true;
-  return allowedRoles.includes(role);
-}
+// RBAC lives in src/lib/rbac-policy.ts — the single source of truth for which
+// role may reach which endpoint (canAccessApi), menu page (canAccessPage) and
+// role group (hasRole). This file stays responsible for identity only: hashing,
+// tokens and reading the caller out of a request.

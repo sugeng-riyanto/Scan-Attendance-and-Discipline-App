@@ -3,13 +3,14 @@
 import { useAuthStore } from '@/lib/stores/auth-store'
 import { useAppStore } from '@/lib/stores/app-store'
 import { NAV_ITEMS, MOBILE_NAV_IDS } from '@/components/dashboard/nav-config'
+import { canAccessPage } from '@/lib/rbac-policy'
 
 export function BottomNav({ themeColor }: { themeColor: string }) {
   const { user } = useAuthStore()
   const { activePage, setActivePage } = useAppStore()
   if (!user) return null
 
-  const items = NAV_ITEMS.filter(n => (user.role === 'SUPER_ADMIN' || n.roles.includes(user.role)) && MOBILE_NAV_IDS.includes(n.id))
+  const items = NAV_ITEMS.filter(n => canAccessPage(user.role, n.id) && MOBILE_NAV_IDS.includes(n.id))
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t lg:hidden safe-area-bottom dark:bg-gray-900 dark:border-gray-800">

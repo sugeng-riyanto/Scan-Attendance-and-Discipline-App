@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { logAudit } from '@/lib/audit';
 
 export async function GET(request: NextRequest) {
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN'])) {
+    if (!canAccessApi(auth.role, 'POST /api/school-config')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { key, value, description } = await request.json();
@@ -44,7 +45,7 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN'])) {
+    if (!canAccessApi(auth.role, 'PUT /api/school-config')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { key, value, description } = await request.json();

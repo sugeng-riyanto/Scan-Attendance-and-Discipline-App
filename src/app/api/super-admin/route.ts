@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole, hashPassword } from '@/lib/auth-utils';
+import { getAuthUser, hashPassword } from '@/lib/auth-utils';
+import { canAccessApi, ROLES } from '@/lib/rbac-policy';
 import { lockoutGuard } from '@/lib/user-lockout';
 import { logAudit } from '@/lib/audit';
 
@@ -9,7 +10,7 @@ import { logAudit } from '@/lib/audit';
 function isSuperAdmin(request: NextRequest): string | null {
   const auth = getAuthUser(request);
   if (!auth) return null;
-  if (!requireRole(auth.role, ['SUPER_ADMIN'])) return 'forbidden';
+  if (!canAccessApi(auth.role, 'GET /api/super-admin')) return 'forbidden';
   return auth.userId;
 }
 
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['SUPER_ADMIN'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!canAccessApi(auth.role, 'GET /api/super-admin')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const { searchParams } = new URL(request.url);
     const resource = searchParams.get('resource') || 'schools';      if (resource === 'schools') {
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['SUPER_ADMIN'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!canAccessApi(auth.role, 'POST /api/super-admin')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const body = await request.json();
     const resource = body.resource;
@@ -241,7 +242,7 @@ export async function POST(request: NextRequest) {
 
     // ---- Users (per-school RBAC) ----
     if (resource === 'users') {
-      const VALID_ROLES = ['SUPER_ADMIN', 'ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA', 'ORANG_TUA', 'SISWA'];
+      const VALID_ROLES = ROLES;
       if (action === 'create' || action === 'update') {
         const { id, username, password, name, role, schoolId, email } = body;
         if (!username || !name || !role) return NextResponse.json({ error: 'Username, nama, dan role wajib diisi' }, { status: 400 });

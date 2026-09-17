@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 
 export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN'])) {
+    if (!canAccessApi(auth.role, 'GET /api/geofence')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const geofences = await db.geofenceConfig.findMany({
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN'])) {
+    if (!canAccessApi(auth.role, 'POST /api/geofence')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { name, centerLat, centerLng, radiusMeters, isDefault } = await request.json();
@@ -55,7 +56,7 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN'])) {
+    if (!canAccessApi(auth.role, 'PUT /api/geofence')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { id, ...data } = await request.json();
@@ -84,7 +85,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN'])) {
+    if (!canAccessApi(auth.role, 'DELETE /api/geofence')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);

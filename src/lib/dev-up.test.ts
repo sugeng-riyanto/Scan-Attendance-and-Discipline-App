@@ -1,0 +1,580 @@
+/**
+ * dev-up.sh bring-up & idempotency E2E
+ *
+ * `/api/setup`-style confidence for the script that starts the whole local
+ * stack. Everything here is asserted against the **operating system**, not
+ * against the script's own report, because the report is exactly what has been
+ * wrong before: `.freebuff/preview.pid` once named a wrapper process that was
+ * alive while the listener was a grandchild.
+ *
+ *  1. the run reports a pid that really owns the app port (the OS's list of
+ *     listeners on that port contains it), that the port serves the app, and
+ *     that the port is the one package.json's `dev` script pins;
+ *  2. a second run starts nothing — same services, same pids, state `reused`,
+ *     no "starting" line anywhere in its output;
+ *  3. a service the script started and that was then killed is started again
+ *     (and a service it did *not* manage is left strictly alone);
+ *  4. `npm run dev:down` stops exactly what dev-up started — from the pids dev-up
+ *     recorded — and leaves everything else alone, including a live pid it cannot
+ *     prove is its own.
+ *
+ * WHY OPT-IN. It spawns and kills real processes, so it is not part of
+ * `bun test`: set DEV_UP_TEST=1. The stack should already be up
+ * (`npm run dev:up`) so the run is seconds rather than a cold Turbopack boot.
+ *
+ *   npm run test:dev-up
+ *   DEV_UP_TEST=1 bun test src/lib/dev-up.test.ts
+ *
+ * The kill/restart case deliberately runs against a **scratch socket port**
+ * (SOCKET_PORT + DEV_UP_LOG_DIR) and asserts the live socket service on 3003 is
+ * untouched, so a developer's running preview keeps its live-update relay.
+ */
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+const REPO = path.resolve(import.meta.dir, '../..')
+const WINDOWS = process.platform === 'win32'
+const ENABLED = process.env.DEV_UP_TEST === '1'
+const SPAWN_TIMEOUT_MS = 240_000
+const suite = ENABLED ? describe : describe.skip
+
+if (!ENABLED) {
+  console.log(
+    '[dev-up.test] skipped — set DEV_UP_TEST=1 (or run `npm run test:dev-up`) with the stack up to exercise .zscripts/dev-up.sh',
+  )
+}
+
+type ServiceReport = {
+  port: number | null
+  pid: number | null
+  state: string
+  runner?: string | null
+  startedByDevUp?: boolean
+}
+type DevUpReport = {
+  root: string
+  appPort: number
+  socketPort: number
+  listenerPid: number | null
+  appListening: boolean
+  pidFile: string
+  schema: { state: string }
+  services: { postgres: ServiceReport; socket: ServiceReport; dev: ServiceReport }
+}
+
+// ------------------------------------------------------------------ processes
+
+function findBash(): string | null {
+  const candidates = [
+    process.env.DEV_UP_BASH,
+    'bash',
+    WINDOWS ? 'C:\\Program Files\\Git\\bin\\bash.exe' : null,
+    WINDOWS ? 'C:\\Program Files (x86)\\Git\\bin\\bash.exe' : null,
+  ].filter((c): c is string => Boolean(c))
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate, ['-c', 'printf ok'], { encoding: 'utf8' })
+    if ((probe.stdout ?? '').trim() === 'ok') return candidate
+  }
+  return null
+}
+
+const BASH = ENABLED ? findBash() : null
+
+function run(cmd: string, args: string[], env: Record<string, string> = {}, cwd = REPO) {
+  return spawnSync(cmd, args, {
+    cwd,
+    encoding: 'utf8',
+    timeout: SPAWN_TIMEOUT_MS,
+    maxBuffer: 32 * 1024 * 1024,
+    env: { ...process.env, ...env },
+  })
+}
+
+function toolAvailable(cmd: string, args: string[]): boolean {
+  const r = spawnSync(cmd, args, { encoding: 'utf8' })
+  return !(r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT')
+}
+
+/** Script stdout is a single JSON object (progress goes to stderr); parse it. */
+function devUp(extraArgs: string[] = [], env: Record<string, string> = {}) {
+  if (!BASH) throw new Error('no bash found — set DEV_UP_BASH to its path')
+  const r = run(BASH, [path.join('.zscripts', 'dev-up.sh'), '--json', ...extraArgs], env)
+  const stdout = r.stdout ?? ''
+  const stderr = r.stderr ?? ''
+  const start = stdout.indexOf('{')
+  if (start === -1) {
+    throw new Error(
+      `dev-up.sh exited ${r.status} with no JSON on stdout.\n--- stderr ---\n${stderr.slice(-4000)}\n--- stdout ---\n${stdout.slice(-2000)}`,
+    )
+  }
+  return {
+    report: JSON.parse(stdout.slice(start)) as DevUpReport,
+    stdout,
+    stderr,
+    status: r.status ?? -1,
+  }
+}
+
+type DownService = { port: number | null; pid: number | null; action: string; reason: string | null }
+type DownReport = {
+  root: string
+  stateFile: string
+  pidFile: string
+  pidFileRemoved: boolean
+  services: Record<string, DownService>
+  stopped: string[]
+  stillListening: number[]
+}
+
+/** Same contract as devUp(): run the script with --json and parse its report. */
+function devDown(env: Record<string, string> = {}) {
+  if (!BASH) throw new Error('no bash found — set DEV_UP_BASH to its path')
+  const r = run(BASH, [path.join('.zscripts', 'dev-down.sh'), '--json'], env)
+  const stdout = r.stdout ?? ''
+  const stderr = r.stderr ?? ''
+  const start = stdout.indexOf('{')
+  if (start === -1) {
+    throw new Error(
+      `dev-down.sh exited ${r.status} with no JSON on stdout.\n--- stderr ---\n${stderr.slice(-4000)}\n--- stdout ---\n${stdout.slice(-2000)}`,
+    )
+  }
+  return {
+    report: JSON.parse(stdout.slice(start)) as DownReport,
+    stdout,
+    stderr,
+    status: r.status ?? -1,
+  }
+}
+
+// Throwaway processes the crafted-state cases need: one that LISTENs (to be a
+// plausible service) and one that merely stays alive (to stand in for a pid the
+// record names but that no longer owns its port).
+const helperProcs: ReturnType<typeof spawn>[] = []
+const helperDirs: string[] = []
+
+function startHelper(code: string): number {
+  const child = spawn(process.env.DEV_UP_NODE ?? 'node', ['-e', code], { stdio: 'ignore' })
+  helperProcs.push(child)
+  return child.pid as number
+}
+
+const listenOn = (port: number) => `require("net").createServer(() => {}).listen(${port}, "127.0.0.1")`
+const idleForever = 'setInterval(() => {}, 1000)'
+
+/**
+ * The pids the OS says are LISTENING on a port — the independent check on what
+ * the script reports. Empty means "nothing is serving this port".
+ */
+function listenerPids(port: number): number[] {
+  if (WINDOWS) {
+    const r = spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    const pids = (r.stdout ?? '')
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/))
+      .filter((f) => f[0] === 'TCP' && f[3] === 'LISTENING' && f[1]?.endsWith(`:${port}`))
+      .map((f) => Number(f[4]))
+      .filter((n) => Number.isInteger(n) && n > 0)
+    return [...new Set(pids)].sort((a, b) => a - b)
+  }
+  const lsof = spawnSync('lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
+  if (!(lsof.error && (lsof.error as NodeJS.ErrnoException).code === 'ENOENT') && lsof.status === 0) {
+    return (lsof.stdout ?? '')
+      .split('\n')
+      .map((l) => Number(l.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0)
+  }
+  const ss = spawnSync('ss', ['-ltnpH', `sport = :${port}`], { encoding: 'utf8' })
+  const pids = [...(ss.stdout ?? '').matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]))
+  return [...new Set(pids)].sort((a, b) => a - b)
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone we may not signal.
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** Kill a process this test started. Unlike the script, the test may kill. */
+function killTree(pid: number): boolean {
+  if (WINDOWS) return run('taskkill', ['/PID', String(pid), '/T', '/F']).status === 0
+  try {
+    process.kill(pid, 'SIGKILL')
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitFor(predicate: () => boolean, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return predicate()
+}
+
+function freePort(from: number): number {
+  for (let port = from; port < from + 60; port += 1) {
+    if (listenerPids(port).length === 0) return port
+  }
+  throw new Error(`no free port in ${from}..${from + 60}`)
+}
+
+/** The port package.json's `dev` script pins — read independently of the script. */
+function devScriptPort(): number {
+  const pkg = JSON.parse(readFileSync(path.join(REPO, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>
+  }
+  const match = pkg.scripts.dev.match(/-p\s*(\d+)/)
+  if (!match) throw new Error('package.json dev script has no -p <port>')
+  return Number(match[1])
+}
+
+async function httpStatus(url: string): Promise<number> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(20_000) })
+    return response.status
+  } catch {
+    return 0
+  }
+}
+
+// ------------------------------------------------------------------ the suite
+
+suite('local stack — dev-up.sh / dev-down.sh', () => {
+  let first: ReturnType<typeof devUp> | undefined
+  let second: ReturnType<typeof devUp> | undefined
+  let appPort = 0
+  let realSocketPort = 0
+  let scratchDir = ''
+  let scratchPort = 0
+  let scratchPid: number | null = null
+
+  beforeAll(() => {
+    if (!BASH) throw new Error('no bash on PATH — set DEV_UP_BASH to its absolute path')
+    if (!WINDOWS) {
+      const canProbe = toolAvailable('lsof', ['-v']) || toolAvailable('ss', ['-V'])
+      if (!canProbe) {
+        throw new Error('need lsof or ss to verify which pid owns a port (apt-get install lsof iproute2)')
+      }
+    }
+    expect(existsSync(path.join(REPO, '.zscripts', 'dev-up.sh'))).toBe(true)
+  })
+
+  afterAll(async () => {
+    if (scratchPid && isAlive(scratchPid)) killTree(scratchPid)
+    if (scratchDir) rmSync(scratchDir, { recursive: true, force: true })
+    for (const helper of helperProcs) if (helper.pid) killTree(helper.pid)
+    for (const dir of helperDirs) rmSync(dir, { recursive: true, force: true })
+    // Safety net: this suite must never leave the developer with a dead socket
+    // service, so if 3003 is empty at the end, put the stack back up.
+    if (BASH && realSocketPort && listenerPids(realSocketPort).length === 0) {
+      console.log('[dev-up.test] socket service is gone — re-running dev-up.sh to restore it')
+      run(BASH, [path.join('.zscripts', 'dev-up.sh')])
+    }
+  })
+
+  it(
+    'brings the stack up and reports the pid the OS says owns the app port',
+    async () => {
+      first = devUp()
+      const report = first.report
+      appPort = report.appPort
+      realSocketPort = report.socketPort
+
+      // The reported port is the one the dev script actually pins.
+      expect(report.appPort).toBe(devScriptPort())
+      expect(report.appListening).toBe(true)
+      expect(report.listenerPid).not.toBeNull()
+      expect(report.services.dev.pid).toBe(report.listenerPid)
+
+      // The pid the script reported must be in the OS's own list of listeners.
+      const owners = listenerPids(appPort)
+      expect(owners).toContain(report.listenerPid as number)
+      expect(isAlive(report.listenerPid as number)).toBe(true)
+
+      // …and that pid's server must be this app, not a stray process.
+      expect(await httpStatus(`http://localhost:${appPort}/api/schools/public`)).toBe(200)
+
+      // The pid file the script writes must agree with what it printed.
+      expect(readFileSync(path.join(REPO, '.zscripts', 'dev-up.pid'), 'utf8').trim()).toBe(
+        String(report.listenerPid),
+      )
+
+      // `--pid` is the same answer without starting anything.
+      if (!BASH) throw new Error('no bash')
+      const pidOnly = run(BASH, [path.join('.zscripts', 'dev-up.sh'), '--pid'])
+      expect(pidOnly.status).toBe(0)
+      expect((pidOnly.stdout ?? '').trim()).toBe(String(report.listenerPid))
+
+      // Every service is up after a bring-up run, not just the app.
+      expect(listenerPids(report.socketPort).length).toBeGreaterThan(0)
+      expect(['reused', 'started']).toContain(report.services.socket.state)
+      expect(['reused', 'external']).toContain(report.services.postgres.state)
+      expect(report.schema.state).toBe('in-sync')
+    },
+    300_000,
+  )
+
+  it(
+    'starts nothing on the second run',
+    () => {
+      if (!first) throw new Error('the first run never happened')
+      const before = listenerPids(appPort)
+      const beforeSocket = listenerPids(first.report.socketPort)
+
+      second = devUp()
+      const report = second.report
+
+      // Nothing is reported as freshly started…
+      expect(['reused', 'external']).toContain(report.services.postgres.state)
+      expect(report.services.socket.state).toBe('reused')
+      expect(report.services.dev.state).toBe('reused')
+      expect(report.schema.state).toBe('in-sync')
+
+      // …the same pids come back…
+      expect(report.services.dev.pid).toBe(first.report.services.dev.pid)
+      expect(report.services.socket.pid).toBe(first.report.services.socket.pid)
+      if (first.report.services.postgres.pid) {
+        expect(report.services.postgres.pid).toBe(first.report.services.postgres.pid)
+      }
+      expect(report.listenerPid).toBe(first.report.listenerPid)
+
+      // …no duplicate landed on the ports…
+      expect(listenerPids(appPort)).toEqual(before)
+      expect(listenerPids(first.report.socketPort)).toEqual(beforeSocket)
+
+      // …and the human output never claims to have started anything.
+      expect(second.stdout).not.toMatch(/starting \(/)
+      expect(second.stderr).not.toMatch(/starting \(/)
+    },
+    180_000,
+  )
+
+  it(
+    'starts a service again after it is killed, and leaves the live one alone',
+    async () => {
+      if (!first || !second) throw new Error('the first two runs never happened')
+      scratchPort = freePort(3210)
+      scratchDir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-test-'))
+      const env = { SOCKET_PORT: String(scratchPort), DEV_UP_LOG_DIR: scratchDir }
+      const liveSocketBefore = listenerPids(realSocketPort)
+      const appBefore = listenerPids(appPort)
+
+      // A first run on the scratch port: the script starts a socket service of
+      // its own, which is ours to kill.
+      const started = devUp(['--no-schema'], env)
+      expect(started.report.socketPort).toBe(scratchPort)
+      expect(started.report.services.socket.port).toBe(scratchPort)
+      expect(started.report.schema.state).toBe('skipped')
+      expect(started.report.services.socket.state).toBe('started')
+      expect(['bun', 'node']).toContain(started.report.services.socket.runner ?? '')
+
+      const firstPid = started.report.services.socket.pid
+      expect(firstPid).not.toBeNull()
+      expect(listenerPids(scratchPort)).toContain(firstPid as number)
+      expect(await httpStatus(`http://localhost:${scratchPort}/socket.io/?EIO=4&transport=polling`)).toBe(200)
+
+      // The scratch run used the overridden log dir, not the live one.
+      expect(existsSync(path.join(scratchDir, 'dev-up-socket.log'))).toBe(true)
+      expect(readFileSync(path.join(scratchDir, 'dev-up.pid'), 'utf8').trim()).toBe(
+        String(started.report.listenerPid),
+      )
+
+      // Kill it. The port going quiet is what proves the reported pid really
+      // owned it, rather than merely being alive.
+      expect(killTree(firstPid as number)).toBe(true)
+      expect(await waitFor(() => listenerPids(scratchPort).length === 0, 15_000)).toBe(true)
+
+      // The next run must put it back — a new pid, serving again.
+      const restarted = devUp(['--no-schema'], env)
+      expect(restarted.report.services.socket.state).toBe('started')
+      const secondPid = restarted.report.services.socket.pid
+      expect(secondPid).not.toBeNull()
+      expect(secondPid).not.toBe(firstPid)
+      expect(listenerPids(scratchPort)).toContain(secondPid as number)
+      expect(await httpStatus(`http://localhost:${scratchPort}/socket.io/?EIO=4&transport=polling`)).toBe(200)
+      scratchPid = secondPid as number
+
+      // The services nobody killed are exactly where they were.
+      expect(listenerPids(realSocketPort)).toEqual(liveSocketBefore)
+      expect(listenerPids(appPort)).toEqual(appBefore)
+      expect(restarted.report.listenerPid).toBe(second.report.listenerPid)
+
+      // Deliberately left running: the next case has dev-down stop it, which is
+      // the path a developer uses to get their machine back.
+      scratchPid = secondPid as number
+    },
+    300_000,
+  )
+
+  it(
+    'dev-down stops exactly what dev-up started and leaves the live stack alone',
+    async () => {
+      if (!first || !scratchPid) throw new Error('the scratch stack was never started')
+      const statePath = path.join(scratchDir, 'dev-up.state.json')
+      expect(existsSync(statePath)).toBe(true)
+
+      // The record is what dev-down acts on: dev-up started the socket on the
+      // scratch port, and merely found PostgreSQL and the dev server.
+      const recorded = JSON.parse(readFileSync(statePath, 'utf8')) as {
+        services: Record<string, ServiceReport>
+      }
+      expect(recorded.services.socket.startedByDevUp).toBe(true)
+      expect(recorded.services.socket.pid).toBe(scratchPid)
+      expect(recorded.services.postgres.startedByDevUp).toBe(false)
+      expect(recorded.services.dev.startedByDevUp).toBe(false)
+
+      const stoppedPid = scratchPid as number
+      const liveSocket = listenerPids(realSocketPort)
+      const liveApp = listenerPids(appPort)
+      expect(listenerPids(scratchPort)).toEqual([stoppedPid])
+
+      const down = devDown({ SOCKET_PORT: String(scratchPort), DEV_UP_LOG_DIR: scratchDir })
+      expect(down.status).toBe(0)
+      expect(down.report.stopped).toEqual(['socket'])
+      expect(down.report.services.socket.action).toBe('stopped')
+      expect(down.report.services.socket.pid).toBe(stoppedPid)
+      expect(down.report.services.postgres.action).toBe('left-alone')
+      expect(down.report.services.dev.action).toBe('left-alone')
+
+      // The scratch service is gone…
+      expect(await waitFor(() => listenerPids(scratchPort).length === 0, 15_000)).toBe(true)
+
+      // …and everything the developer was using is exactly where it was.
+      expect(listenerPids(realSocketPort)).toEqual(liveSocket)
+      expect(listenerPids(appPort)).toEqual(liveApp)
+      expect(await httpStatus(`http://localhost:${realSocketPort}/socket.io/?EIO=4&transport=polling`)).toBe(200)
+
+      scratchPid = null
+    },
+    180_000,
+  )
+
+  it(
+    'dev-down is safe to re-run: what is already gone is reported, nothing is killed twice',
+    () => {
+      const down = devDown({ SOCKET_PORT: String(scratchPort), DEV_UP_LOG_DIR: scratchDir })
+      expect(down.status).toBe(0)
+      expect(down.report.services.socket.action).toBe('already-down')
+      expect(down.report.stopped).toEqual([])
+      expect(listenerPids(appPort).length).toBeGreaterThan(0)
+    },
+    120_000,
+  )
+
+  it(
+    'dev-down stops only what the record calls its own and never an unverified pid',
+    async () => {
+      if (!first) throw new Error('the first run never happened')
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-down-rec-'))
+      helperDirs.push(dir)
+      const oursPort = freePort(3400)
+      const theirsPort = freePort(3450)
+      const idlePort = freePort(3500)
+
+      const fakeApp = startHelper(listenOn(oursPort))
+      const foreign = startHelper(listenOn(theirsPort))
+      const idle = startHelper(idleForever)
+      expect(await waitFor(() => listenerPids(oursPort).length > 0, 10_000)).toBe(true)
+      expect(await waitFor(() => listenerPids(theirsPort).length > 0, 10_000)).toBe(true)
+      expect(listenerPids(idlePort).length).toBe(0)
+
+      writeFileSync(path.join(dir, 'dev-up.pid'), `${fakeApp}\n`)
+      writeFileSync(
+        path.join(dir, 'dev-up.state.json'),
+        JSON.stringify(
+          {
+            root: first.report.root,
+            written: new Date().toISOString(),
+            appPort: oursPort,
+            socketPort: theirsPort,
+            dbPort: null,
+            pidFile: path.join(dir, 'dev-up.pid'),
+            stateFile: path.join(dir, 'dev-up.state.json'),
+            services: {
+              // ours, and the pid still owns its port -> stopped, pid file removed
+              dev: { port: oursPort, pid: fakeApp, supervisor: null, state: 'started', startedByDevUp: true },
+              // someone else's live service -> untouched
+              socket: { port: theirsPort, pid: foreign, supervisor: null, state: 'reused', startedByDevUp: false },
+              // 'ours' by the record, but that pid no longer owns the port -> untouched
+              postgres: { port: idlePort, pid: idle, supervisor: null, state: 'started', startedByDevUp: true },
+            },
+          },
+          null,
+          2,
+        ),
+      )
+
+      const down = devDown({ DEV_UP_LOG_DIR: dir })
+      expect(down.status).toBe(0)
+      expect(down.report.services.dev.action).toBe('stopped')
+      expect(down.report.services.socket.action).toBe('left-alone')
+      expect(down.report.services.socket.reason).toBe('not started by dev-up')
+      expect(down.report.services.postgres.action).toBe('already-down')
+      expect(down.report.pidFileRemoved).toBe(true)
+      expect(existsSync(path.join(dir, 'dev-up.pid'))).toBe(false)
+      expect(down.report.stopped).toEqual(['dev'])
+
+      expect(await waitFor(() => listenerPids(oursPort).length === 0, 15_000)).toBe(true)
+      // The bystanders are untouched: three separate reasons to leave a pid alone,
+      // and not one of them ended in a kill.
+      expect(listenerPids(theirsPort)).toEqual([foreign])
+      expect(isAlive(foreign)).toBe(true)
+      expect(isAlive(idle)).toBe(true)
+    },
+    180_000,
+  )
+
+  it(
+    'dev-down refuses a recorded pid that no longer owns the port',
+    async () => {
+      if (!first) throw new Error('the first run never happened')
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-down-mismatch-'))
+      helperDirs.push(dir)
+      const livePort = freePort(3550)
+      const owner = startHelper(listenOn(livePort))
+      const stale = startHelper(idleForever)
+      expect(await waitFor(() => listenerPids(livePort).length > 0, 10_000)).toBe(true)
+
+      writeFileSync(
+        path.join(dir, 'dev-up.state.json'),
+        JSON.stringify({
+          root: first.report.root,
+          written: new Date().toISOString(),
+          services: {
+            socket: { port: livePort, pid: stale, supervisor: null, state: 'started', startedByDevUp: true },
+          },
+        }),
+      )
+
+      const down = devDown({ DEV_UP_LOG_DIR: dir })
+      expect(down.status).toBe(0)
+      expect(down.report.services.socket.action).toBe('left-alone')
+      expect(down.report.services.socket.reason).toBe('recorded pid does not own the port')
+      expect(down.report.stopped).toEqual([])
+      // Neither the pid the record names nor the service actually on the port.
+      expect(isAlive(stale)).toBe(true)
+      expect(listenerPids(livePort)).toEqual([owner])
+    },
+    120_000,
+  )
+
+  it('dev-down does nothing at all when there is no record', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-down-empty-'))
+    helperDirs.push(dir)
+    const down = devDown({ DEV_UP_LOG_DIR: dir })
+    expect(down.status).toBe(0)
+    expect(down.report.services).toEqual({})
+    expect(down.report.stopped).toEqual([])
+    expect(listenerPids(appPort).length).toBeGreaterThan(0)
+  })
+})

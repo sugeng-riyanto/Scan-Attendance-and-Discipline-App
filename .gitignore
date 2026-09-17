@@ -56,3 +56,8 @@ prompt
 server.log
 # Skills directory
 /skills/.freebuff/
+
+# dev-up.sh records the app-port listener pid and what it started here, and
+# dev-down.sh reads them back (see .zscripts/lib-stack.sh)
+.zscripts/dev-up.pid
+.zscripts/dev-up.state.json

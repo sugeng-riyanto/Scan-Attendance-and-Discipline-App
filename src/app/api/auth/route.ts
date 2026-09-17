@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyPassword, signToken, getAuthUser, requireRole } from '@/lib/auth-utils';
+import { verifyPassword, signToken, getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
-    if (!auth || !requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU'])) {
+    if (!auth || !canAccessApi(auth.role, 'GET /api/auth')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
@@ -214,7 +215,7 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
-    if (!auth || !requireRole(auth.role, ['ADMIN'])) {
+    if (!auth || !canAccessApi(auth.role, 'DELETE /api/auth')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 

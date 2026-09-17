@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 
 // Subscription audit history per school: who renewed/activated/deactivated a
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
     const isSuperAdmin = auth.role === 'SUPER_ADMIN';
     if (!isSuperAdmin) {
       // School-bound Admin/Kepala Sekolah may only see their own school.
-      if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH'])) {
+      if (!canAccessApi(auth.role, 'GET /api/subscription-history')) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
       const scope = await getSchoolScope(auth);

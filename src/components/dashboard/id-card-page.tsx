@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Image, Download, User, CreditCard, GraduationCap, BookOpen, CheckSquare, Square, Shield, Camera, Upload, Calendar } from 'lucide-react'
 import { useAuthStore } from '@/lib/stores/auth-store'
 import { apiFetch } from '@/lib/api-fetch'
+import { STAFF, hasRole } from '@/lib/rbac-policy'
 import { Student, ClassInfo } from './types'
 import { useApiFetch } from './hooks/use-api-fetch'
 import { useSchoolConfig } from './hooks/use-school-config'
@@ -835,7 +836,7 @@ function BatchIdCardView() {
 export function IdCardPage() {
   const { user } = useAuthStore()
   const { data: studentsData } = useApiFetch<{ students: Student[] }>('/api/students?limit=500')
-  const isStaff = user && ['ADMIN', 'WALI_KELAS', 'VP_KESISWAAN', 'GURU', 'KEPALA_SEKOLAH', 'GURU_JAGA'].includes(user.role)
+  const isStaff = hasRole(user?.role, STAFF)
   const isParent = user?.role === 'ORANG_TUA'
 
   if (isStaff) return <BatchIdCardView />

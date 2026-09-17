@@ -4,6 +4,7 @@ import { useAuthStore } from '@/lib/stores/auth-store'
 import { useAppStore } from '@/lib/stores/app-store'
 import { SchoolConfigType } from '@/lib/types'
 import { NAV_ITEMS } from '@/components/dashboard/nav-config'
+import { canAccessPage } from '@/lib/rbac-policy'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { GraduationCap, X } from 'lucide-react'
@@ -13,8 +14,9 @@ export function Sidebar({ schoolConfig, themeColor }: { schoolConfig: SchoolConf
   const { activePage, setActivePage, sidebarOpen, setSidebarOpen } = useAppStore()
   if (!user) return null
 
-  // SUPER_ADMIN can access EVERY role's pages plus its own Super Admin menu.
-  const items = NAV_ITEMS.filter(n => user.role === 'SUPER_ADMIN' || n.roles.includes(user.role))
+  // The menu policy — not this component — decides who sees what, including
+  // the Super Admin's access to every page (src/lib/rbac-policy.ts).
+  const items = NAV_ITEMS.filter(n => canAccessPage(user.role, n.id))
 
   return (
     <aside className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r transform transition-transform duration-200 lg:translate-x-0 dark:bg-gray-900 dark:border-gray-800 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>

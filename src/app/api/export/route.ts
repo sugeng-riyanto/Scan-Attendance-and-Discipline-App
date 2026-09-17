@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { exportToXLSX, createAttendanceExport, createViolationExport, createGoodDeedExport } from '@/lib/export-utils';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
     // No GURU: an export is school-wide (classId defaults to all), which is
     // broader than a teacher's `view_assigned_classes` remit. The menu, the
     // README matrix and `rolePermissions` (export_reports) all exclude them.
-    if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU_JAGA'])) {
+    if (!canAccessApi(auth.role, 'GET /api/export')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);

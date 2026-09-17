@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     const where: any = {};
 
     // School admins see their school's requests; users see only their own
-    if (requireRole(auth.role, ['SUPER_ADMIN', 'ADMIN', 'KEPALA_SEKOLAH'])) {
+    if (canAccessApi(auth.role, 'GET /api/data-rights')) {
       const scope = await getSchoolScope(auth);
       if (!scope.isSuperAdmin && scope.schoolId) {
         where.schoolId = scope.schoolId;
@@ -104,7 +105,7 @@ export async function PUT(request: NextRequest) {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!requireRole(auth.role, ['SUPER_ADMIN', 'ADMIN', 'KEPALA_SEKOLAH'])) {
+    if (!canAccessApi(auth.role, 'PUT /api/data-rights')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

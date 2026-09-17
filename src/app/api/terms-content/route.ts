@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, requireRole } from '@/lib/auth-utils';
+import { getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
 
-// Allowed editors: SUPER_ADMIN (always via requireRole), ADMIN, KEPALA_SEKOLAH
-const EDIT_ROLES = ['ADMIN', 'KEPALA_SEKOLAH'];
+// Reading the history and the acceptance report carries the same right as
+// publishing a version, so the policy's terms-content write key answers all of
+// them (SUPER_ADMIN always passes — see src/lib/rbac-policy.ts).
 
 // GET: Return the active T&C document.
 //   - ?history=true (admin only): returns all versions for the history viewer.
@@ -18,7 +20,7 @@ export async function GET(request: NextRequest) {
     if (wantHistory) {
       // Admin-only: return all versions (body included for diff comparison)
       const auth = getAuthUser(request);
-      if (!auth || !requireRole(auth.role, EDIT_ROLES)) {
+      if (!auth || !canAccessApi(auth.role, 'POST /api/terms-content')) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
       const all = await db.termsContent.findMany({
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest) {
     if (wantAcceptance) {
       // Admin-only: return per-user acceptance status for the current active version
       const auth = getAuthUser(request);
-      if (!auth || !requireRole(auth.role, EDIT_ROLES)) {
+      if (!auth || !canAccessApi(auth.role, 'POST /api/terms-content')) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
 
@@ -101,7 +103,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, EDIT_ROLES)) {
+    if (!canAccessApi(auth.role, 'POST /api/terms-content')) {
       return NextResponse.json({ error: 'Forbidden — only Admin and Kepala Sekolah can edit Terms & Conditions' }, { status: 403 });
     }
 
@@ -155,7 +157,7 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, EDIT_ROLES)) {
+    if (!canAccessApi(auth.role, 'PUT /api/terms-content')) {
       return NextResponse.json({ error: 'Forbidden — only Admin and Kepala Sekolah can edit Terms & Conditions' }, { status: 403 });
     }
 
@@ -214,7 +216,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'KEPALA_SEKOLAH'])) {
+    if (!canAccessApi(auth.role, 'DELETE /api/terms-content')) {
       return NextResponse.json({ error: 'Forbidden — only Admin and Kepala Sekolah can delete Terms & Conditions' }, { status: 403 });
     }
 

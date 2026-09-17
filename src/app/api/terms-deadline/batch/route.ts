@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth-utils'
+import { canAccessApi } from '@/lib/rbac-policy'
 import { getSchoolScope } from '@/lib/school-scope'
 import { logAudit } from '@/lib/audit'
 
@@ -14,7 +15,7 @@ import { logAudit } from '@/lib/audit'
  */
 export async function PATCH(request: NextRequest) {
   const auth = getAuthUser(request)
-  if (!auth || !['ADMIN', 'KEPALA_SEKOLAH', 'SUPER_ADMIN'].includes(auth.role)) {
+  if (!auth || !canAccessApi(auth.role, 'PATCH /api/terms-deadline/batch')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

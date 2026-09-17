@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth-utils';
-
-const ALLOWED_ROLES = ['ADMIN', 'KEPALA_SEKOLAH', 'VP_KESISWAAN', 'WALI_KELAS', 'GURU', 'GURU_JAGA'];
+import { canAccessApi } from '@/lib/rbac-policy';
 
 export async function GET() {
   try {
@@ -55,7 +54,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!ALLOWED_ROLES.includes(auth.role)) {
+    if (!canAccessApi(auth.role, 'POST /api/scan-session')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -196,7 +195,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!ALLOWED_ROLES.includes(auth.role)) {
+    if (!canAccessApi(auth.role, 'PATCH /api/scan-session')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

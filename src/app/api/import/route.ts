@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { hashPassword, getAuthUser, requireRole } from '@/lib/auth-utils';
+import { hashPassword, getAuthUser } from '@/lib/auth-utils';
+import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { generateQRString } from '@/lib/qr-utils';
 import { logAudit } from '@/lib/audit';
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = getAuthUser(request);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!requireRole(auth.role, ['ADMIN', 'VP_KESISWAAN', 'SUPER_ADMIN'])) {
+    if (!canAccessApi(auth.role, 'POST /api/import')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const formData = await request.formData();
