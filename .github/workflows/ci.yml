@@ -195,6 +195,11 @@ jobs:
             tail -4 /tmp/dev-up.err | tr -d '\r' | sed 's/%/%25/g' | while IFS= read -r line; do
               if [ -n "$line" ]; then echo "::error::dev:up: $line"; fi
             done
+            # ...and every warning, which is where a stack that came up without a
+            # nameable pid explains itself.
+            grep '^ *! ' /tmp/dev-up.err | tail -3 | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::warning::dev:up: $line"; fi
+            done
             exit 1
           fi
           cat /tmp/dev-up.err

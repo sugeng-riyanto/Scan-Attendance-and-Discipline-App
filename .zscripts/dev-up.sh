@@ -434,7 +434,7 @@ else
     SOCKET_JUST_STARTED=1
   else
     tail_log "$SOCKET_LOG"
-    fail "socket service did not listen on $SOCKET_PORT within 30s"
+    fail "socket service did not listen on $SOCKET_PORT within 30s ($(probe_detail "$SOCKET_PORT"))"
   fi
 fi
 
@@ -462,11 +462,19 @@ else
   info "starting (npm run dev${SUP_DEV:+, pid $SUP_DEV}, log $(native_path "$DEV_LOG"))"
   if wait_for_port "$APP_PORT" "$APP_WAIT"; then
     PID_DEV="$(listener_pid "$APP_PORT")"
-    info "listening (pid $PID_DEV)"
+    if [ -n "$PID_DEV" ]; then
+      info "listening (pid $PID_DEV)"
+    else
+      # The stack is up but this OS will not name the owner — a container's
+      # published port, or a runner where the probe tools see nothing. Say so and
+      # carry on: the port is served, which is what the callers need, and dev-down
+      # will treat a service it cannot verify as not ours.
+      warn "listening, but no probe here names the owner: $(probe_detail "$APP_PORT")"
+    fi
     STATE_DEV="started"; OURS_DEV=1
   else
     tail_log "$DEV_LOG"
-    fail "nothing is listening on $APP_PORT after ${APP_WAIT}s"
+    fail "nothing is listening on $APP_PORT after ${APP_WAIT}s ($(probe_detail "$APP_PORT"))"
   fi
 fi
 

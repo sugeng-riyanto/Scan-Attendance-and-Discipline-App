@@ -89,13 +89,39 @@ port_taken() { # $1 port
   tcp_open 127.0.0.1 "$1"
 }
 
+# Until the port is being served. This asks port_taken, not listener_pid, and the
+# difference is the whole reason the first CI run could not bring the stack up:
+# there, Next booted ("Ready in 1398ms") and the relay connected, but neither
+# lsof nor ss named the owning pid from the runner, so a loop that required a
+# *named* listener span for its full 300s and then failed a stack that was up.
+# Naming the pid stays listener_pid's job; "is someone there" is port_taken's,
+# which is what this is asking.
 wait_for_port() { # $1 port, $2 seconds — until something LISTENs on it
   local deadline=$((SECONDS + $2))
   while [ "$SECONDS" -lt "$deadline" ]; do
-    [ -n "$(listener_pid "$1")" ] && return 0
+    port_taken "$1" && return 0
     sleep 1
   done
   return 1
+}
+
+# One line for a failure message: what each probe actually saw. "Nothing is
+# listening" and "something is listening that this OS will not name for us" are
+# very different problems, and the second is every bring-up in a container.
+probe_detail() { # $1 port
+  local port="$1" tools
+  if [ "$WINDOWS" = 1 ]; then
+    tools="netstat: $(command -v netstat >/dev/null 2>&1 && printf present || printf absent)"
+  else
+    tools="lsof: $(command -v lsof >/dev/null 2>&1 && printf present || printf absent), ss: $(command -v ss >/dev/null 2>&1 && printf present || printf absent)"
+  fi
+  if [ -n "$(listener_pid "$port")" ]; then
+    printf 'pid %s owns it' "$(listener_pid "$port")"
+  elif tcp_open 127.0.0.1 "$port"; then
+    printf 'a TCP connect is accepted but no tool here names the owner (%s)' "$tools"
+  else
+    printf 'no TCP connect either (%s)' "$tools"
+  fi
 }
 
 wait_for_port_free() { # $1 port, $2 seconds — the down-side of wait_for_port
