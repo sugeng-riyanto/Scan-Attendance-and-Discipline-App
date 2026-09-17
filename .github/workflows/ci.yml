@@ -236,7 +236,16 @@ jobs:
       - name: Full test suite
         run: |
           set -o pipefail
-          bun test 2>&1 | tee /tmp/test.log
+          # On failure every failing test is named as an annotation. bun reports
+          # failures as annotations by itself, but only the first ten survive, and
+          # a step log needs repository admin rights to read from outside the repo.
+          if ! bun test 2>&1 | tee /tmp/test.log; then
+            grep -E '^\(fail\)' /tmp/test.log | head -12 | sed 's/%/%25/g' | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            grep -E '^ *[0-9]+ (pass|fail|skip)' /tmp/test.log | tail -3
+            exit 1
+          fi
 
       # dev-up.sh is a deliverable too, and idempotency is its whole contract:
       # this runs it twice against the stack this job already has up, asserting

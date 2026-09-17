@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { API_ROLES, PUBLIC_API_ROUTES, canAccessApi, isPublicApiRoute, type ApiRoute } from '@/lib/rbac-policy'
+import { closeTestDb, testDb } from '@/lib/test-db'
 
 const BASE = 'http://localhost:3000'
 
@@ -89,23 +90,10 @@ async function getSession(username: string): Promise<Session | null> {
 
 const getToken = async (username: string) => (await getSession(username))?.token ?? null
 
-/**
- * A private Prisma client, deliberately NOT '@/lib/db'.
- *
- * The unit suites replace '@/lib/db' with `mock.module('@/lib/db', () => ({ db: fakeDb }))`,
- * and bun's module mocks are process-wide: in a full `bun test` run this file's
- * cleanup then talked to a stub that has no `violation` model, so the categories
- * probe left rows behind (which turned the next run's 201 into a 409). Importing
- * the generated client directly sidesteps the mock registry entirely.
- */
-let prisma: any
-async function dbClient(): Promise<any> {
-  if (!prisma) {
-    const { PrismaClient } = await import('@/generated/prisma/client')
-    prisma = new PrismaClient({ log: [] })
-  }
-  return prisma
-}
+// A private Prisma client, deliberately not '@/lib/db' — see src/lib/test-db.ts for
+// why the mock registry makes that import unsafe in a full `bun test` run. The same
+// trap later broke api-smoke.test.ts on CI, so both now share one client helper.
+const dbClient = testDb
 
 /**
  * Remove anything a previous run left behind, by marker. Runs before the probes
@@ -467,5 +455,7 @@ afterAll(async () => {
     }).catch((e: Error) => console.error(`${MARKER}: could not restore student totals:`, e?.message))
   }
 
-  await prisma?.$disconnect?.()
+  // The suite that opened the shared client closes it; a later suite asking
+  // testDb() again gets a fresh one.
+  await closeTestDb()
 })

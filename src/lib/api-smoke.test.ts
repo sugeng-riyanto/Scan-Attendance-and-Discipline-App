@@ -23,6 +23,7 @@
 import { describe, expect, it, beforeAll } from 'bun:test'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { testDb } from '@/lib/test-db'
 
 const BASE = 'http://localhost:3000'
 
@@ -250,7 +251,7 @@ describe('API smoke — write probes (rows created and cleaned up here)', () => 
     // Fallback for a broken write path: if the endpoint could not delete it, do
     // it directly so the suite never leaves a 'ZZ Smoke Test' row in the roster.
     try {
-      const { db } = await import('@/lib/db')
+      const db = await testDb()
       await db.dutySchedule.deleteMany({ where: { id: throwawayId } })
     } catch {
       /* the assertion below reports the leak either way */
@@ -269,13 +270,13 @@ describe('API smoke — write probes (rows created and cleaned up here)', () => 
 // the endpoint under test is the broken thing and can't delete its own row.
 
 async function directFind(model: string, where: Record<string, unknown>): Promise<any> {
-  const { db } = await import('@/lib/db')
+  const db = await testDb()
   return (db as any)[model].findFirst({ where })
 }
 
 async function directDelete(model: string, where: Record<string, unknown>): Promise<void> {
   try {
-    const { db } = await import('@/lib/db')
+    const db = await testDb()
     await (db as any)[model].deleteMany({ where })
   } catch {
     /* best effort — the probe's own assertions report the real failure */
@@ -288,7 +289,7 @@ async function directUpdate(
   data: Record<string, unknown>
 ): Promise<void> {
   try {
-    const { db } = await import('@/lib/db')
+    const db = await testDb()
     await (db as any)[model].updateMany({ where, data })
   } catch {
     /* best effort */
