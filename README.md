@@ -425,6 +425,15 @@ rather than the fixture: the write probes create and delete their own rows, and
 Optional repository secrets, both with CI-only fallbacks so neither is required:
 `CI_JWT_SECRET`, `CI_SOCKET_RELAY_TOKEN`.
 
+Naming the process that owns a port is not one question with one answer: `dev-up`
+tries `lsof`, then `ss`, then reads `/proc` directly (nothing to install). A
+listener held by *another user* — CI's Postgres arrives from a service container,
+published by root's `docker-proxy` — is unnameable by any of them without root, so
+that case is reported as served with an unreadable owner instead of being guessed
+at. `.github/workflows/probe-lab.yml` (dispatch-only) prints all three routes for
+both kinds of listener on a real runner, which is how that table in `.freebuff/run.md`
+was measured rather than assumed.
+
 To run the same suite locally, bring the stack up the way CI does — `npm run dev:up`
 — seed once (`curl -X POST 'http://localhost:3000/api/setup?force=true'`), then run
 every file; the unit suites alone need neither a database nor a server:
