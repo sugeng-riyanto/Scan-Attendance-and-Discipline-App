@@ -92,11 +92,14 @@ listener_pid() {
       | awk -v want=":$port" '$1 == "TCP" && $4 == "LISTENING" && $2 ~ want"$" { print $5 }' \
       | sort -u | head -1)"
   else
-    # Try each tool until one actually names a pid. Being installed is not the same
-    # as answering: lsof can be present and still say nothing about a process it may
-    # not inspect, and choosing tools by `command -v` meant the script reported no
-    # owner for a port that was served the whole time — while the test suite's own
-    # probe, which *does* fall back, named it. Whoever answers first wins.
+    # Try each route until one actually names a pid, because being installed is not
+    # the same as answering. What each one does is measured rather than assumed (see
+    # the Port probe lab workflow): for a listener held by this user, lsof, ss and
+    # /proc all name it; for one held by another user — CI's service-container
+    # Postgres, a system daemon — none of them do, and lsof exits 1 saying nothing.
+    # That is a permission boundary, not a tool defect, so the caller must be able
+    # to hear "served, owner unreadable" without mistaking it for "nothing there".
+    # The last route needs nothing installed at all. Whoever answers first wins.
     if command -v lsof >/dev/null 2>&1; then
       found="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null | head -1)"
     fi
@@ -139,11 +142,11 @@ port_taken() { # $1 port
 
 # Until the port is being served. This asks port_taken, not listener_pid, and the
 # difference is the whole reason the first CI run could not bring the stack up:
-# there, Next booted ("Ready in 1398ms") and the relay connected, but neither
-# lsof nor ss named the owning pid from the runner, so a loop that required a
-# *named* listener span for its full 300s and then failed a stack that was up.
-# Naming the pid stays listener_pid's job; "is someone there" is port_taken's,
-# which is what this is asking.
+# there, Next booted ("Ready in 1398ms") and the relay connected, yet the loop
+# never saw a *named* listener and failed a stack that was up. Naming the pid stays
+# listener_pid's job; "is someone there" is port_taken's, which is what this is
+# asking. (What the naming routes report on a runner is settled by measurement now,
+# not by this guess: the Port probe lab workflow prints all of them side by side.)
 wait_for_port() { # $1 port, $2 seconds — until something LISTENs on it
   local deadline=$((SECONDS + $2))
   while [ "$SECONDS" -lt "$deadline" ]; do

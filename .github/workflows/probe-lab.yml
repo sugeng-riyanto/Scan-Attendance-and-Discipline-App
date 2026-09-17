@@ -56,7 +56,11 @@ jobs:
           for port in 3199 5432; do
             echo "================ port $port"
             echo "--- lsof -ti tcp:$port -sTCP:LISTEN"
-            out="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>&1)"; echo "  exit $? out ${out:-<empty>}"
+            # A non-zero exit here is data, not a failure: it is what the tool says
+            # about a socket whose owner we may not read. Never let it end the step.
+            out="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>&1)" || code=$?
+            echo "  exit ${code:-0} out ${out:-<empty>}"
+            unset code
             echo "--- lsof -nP -iTCP:$port -sTCP:LISTEN"
             lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>&1 | head -4 | sed 's/^/  /'
             echo "--- ss -ltnpH (as $(id -un))"
