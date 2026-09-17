@@ -57,10 +57,18 @@ listener_pid() {
     found="$(netstat -ano -p tcp 2>/dev/null | tr -d '\r' \
       | awk -v want=":$port" '$1 == "TCP" && $4 == "LISTENING" && $2 ~ want"$" { print $5 }' \
       | sort -u | head -1)"
-  elif command -v lsof >/dev/null 2>&1; then
-    found="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null | head -1)"
-  elif command -v ss >/dev/null 2>&1; then
-    found="$(ss -ltnpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | head -1)"
+  else
+    # Try each tool until one actually names a pid. Being installed is not the same
+    # as answering: lsof can be present and still say nothing about a process it may
+    # not inspect, and choosing tools by `command -v` meant the script reported no
+    # owner for a port that was served the whole time — while the test suite's own
+    # probe, which *does* fall back, named it. Whoever answers first wins.
+    if command -v lsof >/dev/null 2>&1; then
+      found="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null | head -1)"
+    fi
+    if [ -z "$found" ] && command -v ss >/dev/null 2>&1; then
+      found="$(ss -ltnpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | head -1)"
+    fi
   fi
   printf '%s' "$found"
 }
