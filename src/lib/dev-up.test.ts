@@ -63,10 +63,11 @@ if (!ENABLED) {
     '[dev-up.test] skipped — set DEV_UP_TEST=1 (or run `npm run test:dev-up`) with the stack up to exercise .zscripts/dev-up.sh',
   )
   if (process.env.CI) {
-    // CI sets DEV_UP_TEST=1 for the bring-up step, so this firing means the step
-    // claims to verify the script and does not.
+    // Disclosure, not an alarm: the full-suite step runs this file without
+    // DEV_UP_TEST, and skipping is the intended behaviour there. The step that
+    // *must* have it enforced does not rely on this notice — it fails outright.
     console.log(
-      '::notice title=dev-up suite did not run::DEV_UP_TEST is not 1, so the bring-up/tear-down suite reported success without exercising a single script.',
+      '::notice title=opt-in suite not part of this step::src/lib/dev-up.test.ts skipped itself because DEV_UP_TEST is not 1 — expected outside the bring-up step, which sets it and fails if it does not arrive.',
     )
   }
 }

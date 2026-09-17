@@ -274,7 +274,7 @@ jobs:
           # Every skip the suite makes is already an annotation (it emits a
           # `::notice::`), which is the whole point: passing by not checking must
           # not look like passing by checking.
-          if grep -q 'dev-up suite did not run' /tmp/dev-up-test.log; then
+          if grep -q 'opt-in suite not part of this step' /tmp/dev-up-test.log; then
             echo '::error::the bring-up suite was disabled — DEV_UP_TEST did not reach it, so this step verified nothing'
             exit 1
           fi
