@@ -31,7 +31,15 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -214,7 +222,60 @@ function listenerPids(port: number): number[] {
   }
   const ss = spawnSync('ss', ['-ltnpH', `sport = :${port}`], { encoding: 'utf8' })
   const pids = [...(ss.stdout ?? '').matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]))
-  return [...new Set(pids)].sort((a, b) => a - b)
+  if (pids.length) return [...new Set(pids)].sort((a, b) => a - b)
+  return pidsByProc(port)
+}
+
+/** The LISTEN socket's inode for `port`, read from /proc/net/tcp (state 0A). */
+function listenInode(port: number): string | null {
+  const hex = port.toString(16).toUpperCase().padStart(4, '0')
+  for (const file of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    let text: string
+    try {
+      text = readFileSync(file, 'utf8')
+    } catch {
+      continue
+    }
+    for (const line of text.split('\n').slice(1)) {
+      const f = line.trim().split(/\s+/)
+      if (f[3] === '0A' && f[1]?.endsWith(`:${hex}`)) return f[9] ?? null
+    }
+  }
+  return null
+}
+
+/**
+ * Pids resolved through /proc alone — no lsof, no ss, nothing to install. The
+ * kernel's own bookkeeping: /proc/net/tcp names each TCP socket by inode, and its
+ * holder has that inode open as `socket:[inode]` under /proc/<pid>/fd. A listener
+ * owned by another user stays invisible here too, which is the truth rather than a
+ * limitation of the probe: no tool can attribute a socket it may not read.
+ */
+function pidsByProc(port: number): number[] {
+  const inode = listenInode(port)
+  if (!inode) return []
+  const found: number[] = []
+  for (const entry of readdirSync('/proc')) {
+    const pid = Number(entry)
+    if (!Number.isInteger(pid) || pid <= 0) continue
+    let fds: string[]
+    try {
+      fds = readdirSync(`/proc/${pid}/fd`)
+    } catch {
+      continue // another user's process, or one that just exited
+    }
+    for (const fd of fds) {
+      try {
+        if (readlinkSync(`/proc/${pid}/fd/${fd}`) === `socket:[${inode}]`) {
+          found.push(pid)
+          break
+        }
+      } catch {
+        // the fd closed between listing and reading it
+      }
+    }
+  }
+  return [...new Set(found)].sort((a, b) => a - b)
 }
 
 /**
@@ -242,6 +303,12 @@ function probeToolsReport(port: number): string {
     ss.error
       ? 'ss: absent'
       : `ss: exit ${ss.status}, out ${JSON.stringify((ss.stdout ?? '').trim())}`,
+  )
+  const inode = listenInode(port)
+  parts.push(
+    inode
+      ? `/proc/net/tcp: LISTEN socket inode ${inode}, named by ${pidsByProc(port).length ? 'a readable holder' : 'no process we may read'}`
+      : '/proc/net/tcp: no LISTEN socket for this port',
   )
   return parts.join('; ')
 }
@@ -379,7 +446,9 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
         expect(owners).toContain(report.listenerPid as number)
         expect(isAlive(report.listenerPid as number)).toBe(true)
       } else {
-        namingWhy = `the OS names no pid listening on :${appPort} — ${probeToolsReport(appPort)}`
+        namingWhy =
+          `nothing on this platform names the pid listening on :${appPort}, ` +
+          `including /proc, which needs nothing installed — ${probeToolsReport(appPort)}`
         announceSkip(
           `[dev-up.test] SKIPPING every pid-ownership assertion for the app port: ${namingWhy}. ` +
             `The script reports listenerPid=${report.listenerPid} while the port is served and answers; ` +

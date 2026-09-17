@@ -1,0 +1,94 @@
+name: Port probe lab
+
+# Diagnostic, not a gate: it answers one question with evidence instead of
+# inference — "what can a Linux runner say about who owns a listening port?" —
+# for the two cases that differ, a listener this job started and one owned by
+# another user (the service container's published port). It never fails a build;
+# read the job log.
+#
+# Dispatch-only, plus a push that touches this file itself, so editing the lab is
+# what runs it and nothing else does.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/probe-lab.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: probe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Who we are, and which tools exist
+        run: |
+          id
+          echo "--- tools"
+          for t in lsof ss netstat fuser pgrep readlink awk; do
+            printf '  %-9s %s\n' "$t" "$(command -v "$t" || echo ABSENT)"
+          done
+          echo "--- lsof version"
+          lsof -v 2>&1 | head -3 || echo "  (lsof could not run)"
+          echo "--- /proc mount options"
+          findmnt -no OPTIONS /proc 2>/dev/null || grep ' /proc ' /proc/mounts
+
+      - name: Name the owner of two ports by every route available
+        run: |
+          # shellcheck disable=SC1091
+          . .zscripts/lib-stack.sh
+
+          # A listener of our own, on a port nothing else wants.
+          node -e 'require("net").createServer(() => {}).listen(3199, "127.0.0.1")' &
+          sleep 1
+
+          # 5432 is the service container's published port: served, but owned by
+          # the root process that publishes it, not by us.
+          for port in 3199 5432; do
+            echo "================ port $port"
+            echo "--- lsof -ti tcp:$port -sTCP:LISTEN"
+            out="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>&1)"; echo "  exit $? out ${out:-<empty>}"
+            echo "--- lsof -nP -iTCP:$port -sTCP:LISTEN"
+            lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>&1 | head -4 | sed 's/^/  /'
+            echo "--- ss -ltnpH (as $(id -un))"
+            out="$(ss -ltnpH "sport = :$port" 2>&1)"; echo "  exit $? out ${out:-<empty>}"
+            echo "--- ss -ltnpH (as root, for contrast)"
+            sudo ss -ltnpH "sport = :$port" 2>&1 | head -3 | sed 's/^/  /' || true
+            echo "--- /proc/net/tcp (state 0A = LISTEN)"
+            awk -v want=":$(printf '%04X' "$port")" '$4=="0A" && $2 ~ want"$" { print "  ", $2, "inode", $10 }' /proc/net/tcp /proc/net/tcp6
+            echo "--- via the project's own probes"
+            echo "  listen_inode:  '$(listen_inode "$port")'"
+            echo "  pid_by_proc:   '$(pid_by_proc "$port")'"
+            echo "  listener_pid:  '$(listener_pid "$port")'"
+            echo "  probe_detail:  $(probe_detail "$port")"
+          done
+
+      - name: Can we read the holder of the container's socket?
+        run: |
+          # The inode /proc/net/tcp gives us for 5432, and who has it open. This is
+          # the boundary the whole question is about: the socket is real and the
+          # holder's /proc entry is either readable or it is not.
+          # shellcheck disable=SC1091
+          . .zscripts/lib-stack.sh
+          inode="$(listen_inode 5432)"
+          echo "5432 LISTEN inode: '${inode:-none}'"
+          if [ -n "$inode" ]; then
+            hits=0
+            for fd in /proc/[0-9]*/fd/*; do
+              [ "$(readlink "$fd" 2>/dev/null)" = "socket:[$inode]" ] || continue
+              echo "  readable holder: ${fd#/proc/}"
+              hits=$((hits + 1))
+            done
+            echo "  readable holders found: $hits"
+            echo "  (root's view, for contrast:)"
+            sudo bash -c 'for fd in /proc/[0-9]*/fd/*; do [ "$(readlink "$fd" 2>/dev/null)" = "socket:['"$inode"']" ] && echo "    ${fd#/proc/}"; done' | head -5
+          fi

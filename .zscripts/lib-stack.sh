@@ -48,8 +48,42 @@ usage() { # $1 the script file to read
 
 # ------------------------------------------------------------------- port probes
 
-# pid owning the LISTEN socket on $1, or empty. Cross-platform, no dependencies
-# beyond the OS's own tools.
+# The inode of the LISTEN socket on $1 as /proc/net/tcp reports it, or empty.
+# Each row is `sl local_address rem_address st ... inode`, state 0A is LISTEN, and
+# the local port is the part of the address after the last colon.
+listen_inode() { # $1 port
+  local port="$1" hex
+  [ -r /proc/net/tcp ] || return 0
+  hex="$(printf '%04X' "$port")"
+  awk -v want=":$hex" '$4 == "0A" && $2 ~ want"$" { print $10 }' \
+    /proc/net/tcp /proc/net/tcp6 2>/dev/null | head -1
+}
+
+# pid holding the LISTEN socket on $1, resolved through /proc alone: no lsof, no
+# ss, no iproute2, nothing that has to be installed. /proc/net/tcp names every TCP
+# socket by inode and its holder has that inode open as `socket:[inode]`, so the
+# answer is the OS's own bookkeeping rather than a tool's summary of it.
+#
+# This sees exactly what the kernel lets us read, which is the point: a listener
+# owned by another user (a service container's published port, a root-owned
+# PostgreSQL) has no readable /proc/<pid>/fd here either, so the caller still
+# learns "served, owner unreadable" rather than a wrong pid. Same-user listeners —
+# every service this script starts — are always resolvable, which is what makes the
+# ownership assertions in the test suite runnable instead of skippable.
+pid_by_proc() { # $1 port
+  local port="$1" inode pid fd
+  inode="$(listen_inode "$port")"
+  [ -n "$inode" ] || return 0
+  for fd in /proc/[0-9]*/fd/*; do
+    [ "$(readlink "$fd" 2>/dev/null)" = "socket:[$inode]" ] || continue
+    pid="${fd#/proc/}"
+    printf '%s' "${pid%%/*}"
+    return 0
+  done
+}
+
+# pid owning the LISTEN socket on $1, or empty. Cross-platform, and each branch is
+# a different tool for the same question.
 listener_pid() {
   local port="$1" found=""
   [ -n "$port" ] || return 0
@@ -68,6 +102,12 @@ listener_pid() {
     fi
     if [ -z "$found" ] && command -v ss >/dev/null 2>&1; then
       found="$(ss -ltnpH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | head -1)"
+    fi
+    # Last, and the only link that installs nothing and asks nobody: /proc. A
+    # minimal image (no lsof, no iproute2) and a tool that answers nothing are the
+    # same problem to the two checks above, and this covers both.
+    if [ -z "$found" ]; then
+      found="$(pid_by_proc "$port")"
     fi
   fi
   printf '%s' "$found"
@@ -117,16 +157,23 @@ wait_for_port() { # $1 port, $2 seconds — until something LISTENs on it
 # listening" and "something is listening that this OS will not name for us" are
 # very different problems, and the second is every bring-up in a container.
 probe_detail() { # $1 port
-  local port="$1" tools
+  local port="$1" tools why=""
   if [ "$WINDOWS" = 1 ]; then
     tools="netstat: $(command -v netstat >/dev/null 2>&1 && printf present || printf absent)"
   else
-    tools="lsof: $(command -v lsof >/dev/null 2>&1 && printf present || printf absent), ss: $(command -v ss >/dev/null 2>&1 && printf present || printf absent)"
+    tools="lsof: $(command -v lsof >/dev/null 2>&1 && printf present || printf absent)"
+    tools="$tools, ss: $(command -v ss >/dev/null 2>&1 && printf present || printf absent)"
+    tools="$tools, /proc/net/tcp: $([ -r /proc/net/tcp ] && printf present || printf absent)"
+    # When the socket is right there and still has no readable holder, say so: the
+    # pid is being withheld by permissions, which no tool in this list can fix.
+    if [ -r /proc/net/tcp ] && [ -n "$(listen_inode "$port")" ]; then
+      why=" — its LISTEN socket exists (inode $(listen_inode "$port")) but no process running as $(id -un) has it open, so the owner is another user's"
+    fi
   fi
   if [ -n "$(listener_pid "$port")" ]; then
     printf 'pid %s owns it' "$(listener_pid "$port")"
   elif tcp_open 127.0.0.1 "$port"; then
-    printf 'a TCP connect is accepted but no tool here names the owner (%s)' "$tools"
+    printf 'a TCP connect is accepted but nothing names the owner (%s)%s' "$tools" "$why"
   else
     printf 'no TCP connect either (%s)' "$tools"
   fi
