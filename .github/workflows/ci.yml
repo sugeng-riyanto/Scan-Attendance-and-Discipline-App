@@ -51,14 +51,27 @@ jobs:
         run: |
           set -u
           BASELINE=18
-          bunx tsc --noEmit > /tmp/tsc.log 2>&1 && STATUS=0 || STATUS=$?
+          # The project's own compiler — the one a developer runs — rather than
+          # `bunx tsc`, which on the first real CI run returned the *same* 18
+          # diagnostics with exit 2 (DiagnosticsPresent_OutputsGenerated) where the
+          # local binary returns 1, and so failed a check that had in fact
+          # type-checked everything.
+          if [ -x ./node_modules/.bin/tsc ]; then
+            TSC=./node_modules/.bin/tsc
+          else
+            echo "::warning::node_modules/.bin/tsc is missing — falling back to bunx tsc"
+            TSC="bunx tsc"
+          fi
+          $TSC --noEmit > /tmp/tsc.log 2>&1 && STATUS=0 || STATUS=$?
           COUNT=$(grep -c 'error TS' /tmp/tsc.log || true)
           COUNT=${COUNT:-0}
           echo "Type errors: $COUNT (allowed backlog: $BASELINE), tsc exit: $STATUS"
-          # tsc exits 2+ when it cannot run at all (bad config, missing binary).
-          # A 0-error reading from a run that never happened would be a
-          # permanent false green, so treat it as a failure.
-          if [ "$STATUS" -gt 1 ] || { [ "$STATUS" -ne 0 ] && [ "$COUNT" -eq 0 ]; }; then
+          # tsc's own exit codes: 1 = diagnostics found, emit skipped; 2 =
+          # diagnostics found, outputs generated (both mean it checked things). 3
+          # and 4 are invalid-project and project-reference-cycle — nothing was
+          # checked — and so is any non-zero exit that parsed no diagnostic at
+          # all. Those are the false greens this guard exists for.
+          if [ "$STATUS" -gt 2 ] || { [ "$STATUS" -ne 0 ] && [ "$COUNT" -eq 0 ]; }; then
             echo "::error::tsc did not run properly (exit $STATUS, $COUNT errors parsed)"
             tail -20 /tmp/tsc.log
             exit 1
@@ -166,13 +179,25 @@ jobs:
         env:
           DEV_UP_APP_TIMEOUT: '300'
         run: |
-          set -o pipefail
           # The documented entry point, not a copy of it: `npm run dev:up` is the
           # one-liner the README and the run doc give a developer. `--silent`
           # keeps npm's banner off stdout so `--json` stays machine-readable, and
           # the sed is a belt for npm versions that print it anyway (the JSON is
           # the only thing the script writes to stdout in that mode).
-          npm run dev:up --silent -- --json | tee /tmp/dev-up.out
+          #
+          # On failure dev-up's own last lines are re-emitted as annotations: a step
+          # log needs repository admin rights to read from outside the repo, an
+          # annotation does not, so this is what makes a bring-up failure readable
+          # from the run page instead of guessed at.
+          if ! npm run dev:up --silent -- --json > /tmp/dev-up.out 2> /tmp/dev-up.err; then
+            echo '--- npm run dev:up stderr ---'
+            cat /tmp/dev-up.err
+            tail -4 /tmp/dev-up.err | tr -d '\r' | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::dev:up: $line"; fi
+            done
+            exit 1
+          fi
+          cat /tmp/dev-up.err
           sed -n '/^{/,$p' /tmp/dev-up.out > /tmp/dev-up.json
           # The script warns rather than fails on a 5xx, because a first compile
           # can be slow; CI wants a hard failure, on the endpoint the old
@@ -232,6 +257,15 @@ jobs:
           tail -200 .zscripts/dev-up.log 2>/dev/null || true
           echo '--- socket service (.zscripts/dev-up-socket.log) ---'
           tail -50 .zscripts/dev-up-socket.log 2>/dev/null || true
+          # The tail of each also goes to annotations, for the same reason as in
+          # the bring-up step: that is the part of a failed run readable without
+          # repository admin rights.
+          for f in .zscripts/dev-up.log .zscripts/dev-up-socket.log /tmp/dev-up.err; do
+            [ -f "$f" ] || continue
+            tail -4 "$f" | tr -d '\r' | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$(basename "$f"): $line"; fi
+            done
+          done
 
       - name: Upload logs on failure
         if: failure()
@@ -242,6 +276,8 @@ jobs:
             .zscripts/dev-up.log
             .zscripts/dev-up-socket.log
             /tmp/dev-up.json
+            /tmp/dev-up.out
+            /tmp/dev-up.err
             /tmp/dev-down.json
             /tmp/test.log
             /tmp/seed.json
