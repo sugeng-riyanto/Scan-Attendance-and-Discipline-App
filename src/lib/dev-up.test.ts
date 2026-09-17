@@ -41,10 +41,34 @@ const ENABLED = process.env.DEV_UP_TEST === '1'
 const SPAWN_TIMEOUT_MS = 240_000
 const suite = ENABLED ? describe : describe.skip
 
+/**
+ * Report that this suite proved less than it wanted to, and why.
+ *
+ * Locally this is just a line on stderr. Under GitHub Actions it is also a
+ * `::notice::` workflow command, which GitHub turns into a run annotation — because
+ * a step that passed while quietly skipping its ownership assertions looks exactly
+ * like a step that passed by checking them, and the job log that would tell the two
+ * apart needs repository admin rights to read.
+ */
+function announceSkip(message: string): void {
+  console.warn(message)
+  if (process.env.CI) {
+    // One line: a newline would truncate the annotation at the first break.
+    console.log(`::notice title=dev-up suite skipped an assertion::${message.replace(/\s+/g, ' ').trim()}`)
+  }
+}
+
 if (!ENABLED) {
   console.log(
     '[dev-up.test] skipped — set DEV_UP_TEST=1 (or run `npm run test:dev-up`) with the stack up to exercise .zscripts/dev-up.sh',
   )
+  if (process.env.CI) {
+    // CI sets DEV_UP_TEST=1 for the bring-up step, so this firing means the step
+    // claims to verify the script and does not.
+    console.log(
+      '::notice title=dev-up suite did not run::DEV_UP_TEST is not 1, so the bring-up/tear-down suite reported success without exercising a single script.',
+    )
+  }
 }
 
 type ServiceReport = {
@@ -355,7 +379,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
         expect(isAlive(report.listenerPid as number)).toBe(true)
       } else {
         namingWhy = `the OS names no pid listening on :${appPort} — ${probeToolsReport(appPort)}`
-        console.warn(
+        announceSkip(
           `[dev-up.test] SKIPPING every pid-ownership assertion for the app port: ${namingWhy}. ` +
             `The script reports listenerPid=${report.listenerPid} while the port is served and answers; ` +
             'saying "no pid" rather than claiming one it cannot verify is the correct answer here, and ' +
@@ -463,7 +487,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
         // Nothing on this platform can name the process, so there is no handle to
         // kill and the restart path cannot be exercised. Say so and move on rather
         // than asserting something the platform cannot support.
-        console.warn(
+        announceSkip(
           `[dev-up.test] SKIPPING the kill/restart case for the scratch socket on :${scratchPort}: ` +
             `neither a listener pid nor a supervisor pid is available (${probeToolsReport(scratchPort)}).`,
         )
@@ -475,7 +499,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       if (socketPidNameable) {
         expect(listenerPids(scratchPort)).toContain(firstPid as number)
       } else {
-        console.warn(
+        announceSkip(
           `[dev-up.test] SKIPPING the pid-name assertions for the scratch socket on :${scratchPort}: ` +
             `${probeToolsReport(scratchPort)}. Its process is still killed below, by the supervisor pid ` +
             'dev-up recorded, and the port going quiet is what proves that pid really owned it.',
@@ -523,7 +547,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
     'dev-down stops exactly what dev-up started and leaves the live stack alone',
     async () => {
       if (!first || !scratchStackStarted) {
-        console.warn(
+        announceSkip(
           '[dev-up.test] SKIPPING: the scratch stack was never started (see the kill/restart case), ' +
             'so there is nothing for dev-down to stop.',
         )
@@ -580,7 +604,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
     'dev-down is safe to re-run: what is already gone is reported, nothing is killed twice',
     () => {
       if (!scratchStackStarted) {
-        console.warn('[dev-up.test] SKIPPING: no scratch stack to re-run dev-down against.')
+        announceSkip('[dev-up.test] SKIPPING: no scratch stack to re-run dev-down against.')
         return
       }
 

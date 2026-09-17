@@ -132,6 +132,11 @@ The same file covers `dev:down`: that it stops what `dev:up` started on a scratc
 while the live stack is untouched, that it is safe to re-run, that it never kills a pid
 the record does not account for, and that it stops nothing at all when there is no record.
 
+Where a platform cannot name the pid holding a port, the suite skips the assertions that
+need one and says so — in CI as a `::notice::` annotation, so a step that passed by not
+checking cannot look like one that passed by checking. CI also fails the step outright if
+the suite never ran.
+
 ### Initial Setup
 
 1. Open `http://localhost:3000` — you'll see the **school directory**

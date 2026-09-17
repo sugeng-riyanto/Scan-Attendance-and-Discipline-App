@@ -260,7 +260,32 @@ jobs:
       - name: Bring-up script is idempotent
         env:
           DEV_UP_TEST: '1'
-        run: bun test src/lib/dev-up.test.ts
+        run: |
+          # Captured rather than streamed so the whole log can be inspected after
+          # the fact: a step that failed and a step that skipped look the same in
+          # `bun test`'s summary, and only the log separates them.
+          if bun test src/lib/dev-up.test.ts > /tmp/dev-up-test.log 2>&1; then
+            status=0
+          else
+            status=$?
+          fi
+          cat /tmp/dev-up-test.log
+          grep -E '^ *[0-9]+ (pass|fail|skip)' /tmp/dev-up-test.log | tail -3 || true
+          # Every skip the suite makes is already an annotation (it emits a
+          # `::notice::`), which is the whole point: passing by not checking must
+          # not look like passing by checking.
+          if grep -q 'dev-up suite did not run' /tmp/dev-up-test.log; then
+            echo '::error::the bring-up suite was disabled — DEV_UP_TEST did not reach it, so this step verified nothing'
+            exit 1
+          fi
+          # Belt as well as braces: the notice above only exists under GitHub
+          # Actions (the suite gates its annotations on CI), so this step also
+          # refuses to pass on a run that collected nothing.
+          if ! grep -Eq '^ *[1-9][0-9]* pass' /tmp/dev-up-test.log; then
+            echo '::error::the bring-up suite ran no tests, so this step verified nothing'
+            exit 1
+          fi
+          exit "$status"
 
       # The dev server and socket service logs now live where the script puts
       # them (the run doc names the same paths), not in /tmp.
