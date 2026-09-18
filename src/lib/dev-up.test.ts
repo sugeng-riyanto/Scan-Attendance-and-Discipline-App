@@ -577,10 +577,19 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
         // form a preview needs: handing over a wrapper pid, or a "null" that looks like
         // a number, is the mistake this suite exists to catch in the first place.
         const previewOnly = run(BASH, [path.join('.zscripts', 'dev-up.sh'), '--preview'])
-      const expectedCall = `register_preview({ url: "http://localhost:${appPort}/", pid: ${report.listenerPid} })`
+        const expectedCall = `register_preview({ url: "http://localhost:${appPort}/", pid: ${report.listenerPid} })`
       expect(report.preview.url).toBe(`http://localhost:${appPort}/`)
       if (namingAvailable) {
-        expect(previewOnly.status).toBe(0)
+        // Thrown rather than asserted, with the script's own words: a bare "1 !== 0" says
+        // nothing about which of the two refusals fired, and this is exactly the kind of
+        // failure that is only reachable on a runner — the first run of it here reported the
+        // number and left the reason for whoever could not read the step log.
+        if (previewOnly.status !== 0) {
+          throw new Error(
+            `dev-up.sh --preview exited ${previewOnly.status}, expected 0.\n` +
+              `--- stdout ---\n${previewOnly.stdout}\n--- stderr ---\n${previewOnly.stderr}`,
+          )
+        }
         expect((previewOnly.stdout ?? '').trim()).toBe(expectedCall)
         expect(report.preview.ready).toBe(true)
         expect(report.preview.pid).toBe(report.listenerPid)
@@ -1215,11 +1224,20 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
         path.join(dir, 'package.json'),
         JSON.stringify({ scripts: { dev: `next dev -p ${port}` } }),
       )
-      // This checkout was not created an hour ago, so the one restart-required file it starts
-      // with is dated back to before the boot markers below. What this case varies is time,
-      // and a `package.json` written moments ago is newer than any marker meant to precede it.
+      // This checkout was not created an hour ago, so the two restart-required files it starts
+      // with are dated back to before the boot markers below. What this case varies is time, and
+      // a `package.json` written moments ago is newer than any marker meant to precede it.
       const twoHoursAgo = new Date(Date.now() - 7_200_000)
       utimesSync(path.join(dir, 'package.json'), twoHoursAgo, twoHoursAgo)
+      // The socket package gets a real file rather than staying an empty directory: this
+      // fixture lives in the OS temp directory, and one local run had that empty directory
+      // vanish mid-case. Nothing here or in `.zscripts` removes a directory (the only deletions
+      // are the claim files a service takes with it on a clean exit), so a directory with
+      // content in it is the fixture that cannot be mistaken for scratch. Rewritten in the last
+      // part, where a newer copy of it is the case under test.
+      const socketSource = path.join(socketDir, 'index.ts')
+      writeFileSync(socketSource, '// the source this running copy was started from\n')
+      utimesSync(socketSource, twoHoursAgo, twoHoursAgo)
 
       // Whoever answers a port is the process holding it, so a helper that answers the
       // identity route truthfully takes the app's place here: the pid dev-up reports is this
@@ -1386,7 +1404,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       // 6. The other service, and the other reason. No config file is involved here: the
       //    socket mini-service is executed from source with no watcher at all, so a file
       //    inside its own directory leaves a running copy behind its own code.
-      writeFileSync(path.join(socketDir, 'index.ts'), '// the source this running copy was started from\n')
+      writeFileSync(socketSource, '// the source this running copy was started from\n')
       const staleSocket = devUpIn(['--no-schema'])
       expect(staleSocket.report.services.socket.staleness).toMatchObject({
         checked: true,

@@ -51,6 +51,11 @@
 #   SOCKET_PORT     override the live-update socket port (default: index.ts)
 #   DEV_UP_APP_TIMEOUT  seconds to wait for the app to listen (default 120) and
 #                   then to answer (default 90). CI raises it for a cold runner.
+#   DEV_UP_PREVIEW_TIMEOUT  seconds --preview gives the URL to answer before refusing to
+#                   hand it over (default 60): a page is compiled before it is served, and
+#                   the landing page is usually the first thing asked for on a cold runner.
+#                   The wait ends at the first answer, so this ceiling costs nothing when
+#                   the page does answer; it is only ever paid by a page that does not.
 #
 # Staleness is reported in two places: a `stale:` line in the summary (beside the
 # preview call, which is what it is warning you about) and
@@ -252,6 +257,17 @@ fi
 # used to have (see .github/workflows/ci.yml).
 APP_WAIT="${DEV_UP_APP_TIMEOUT:-120}"
 HTTP_WAIT="${DEV_UP_APP_TIMEOUT:-90}"
+# How long `--preview` keeps asking the URL before it refuses to hand over a call. Separate
+# from the two above on purpose: those wait for a stack this script is bringing up, while this
+# one is a handoff someone is watching for — patient enough for a first compile, short enough
+# to still be an answer.
+#
+# One page, not one stack, and it is compiled *after* the readiness probe was already answered,
+# so this number covers a single cold compile — which a runner does for the landing page at a
+# moment when nothing else in the job has asked for it. The loop returns on the first answer,
+# so 60 is not 60 seconds of delay but a ceiling only a page that never answers can reach; the
+# two refusal paths (no pid, app not answering at all) do not wait on it at all.
+PREVIEW_WAIT="${DEV_UP_PREVIEW_TIMEOUT:-60}"
 
 if [ "$PID_ONLY" = 1 ]; then
   read -r pid PID_SOURCE <<<"$(service_pid "$APP_PORT" "$SERVER_PID_FILE" "$ROOT" "$SERVER_IDENTITY_PATH")"
@@ -270,6 +286,27 @@ fi
 # rediscover the listener to watch the app.
 preview_url() { printf 'http://localhost:%s/' "$APP_PORT"; }
 
+# The status `$PREVIEW_URL` answers with — asked until it answers, rather than once.
+#
+# A `next dev` compiles a page before it serves it, and `/` is the first thing a preview loads
+# and, on a cold runner, the first thing anything asks for at all. So one five-second look
+# reports "never answered" for a page that is merely still being built, which is the one answer
+# this must not get wrong: the question is "would registering this URL show an error page?", and
+# a compile in progress is not an answer to that either way. Measured on CI, where nothing else
+# in the job had requested the landing page and this fetch is what failed the run. Bounded by
+# PREVIEW_WAIT, because this is also a handoff someone is waiting for; prints the last code seen
+# (000 when it never answered at all).
+preview_url_code() {
+  local code="" deadline=$((SECONDS + PREVIEW_WAIT))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    code="$(http_code "$(preview_url)")"
+    [ "$code" = "000" ] || break
+    sleep 1
+  done
+  [ -n "$code" ] || code="$(http_code "$(preview_url)")"
+  printf '%s' "$code"
+}
+
 # The literal tool call, so it can be copied (or read by a machine) as-is.
 register_preview_line() { # $1 listener pid
   printf 'register_preview({ url: "%s", pid: %s })\n' "$(preview_url)" "$1"
@@ -277,15 +314,17 @@ register_preview_line() { # $1 listener pid
 
 if [ "$PREVIEW_ONLY" = 1 ]; then
   read -r pid PID_SOURCE <<<"$(service_pid "$APP_PORT" "$SERVER_PID_FILE" "$ROOT" "$SERVER_IDENTITY_PATH")"
-  code="$(http_code "$(preview_url)")"
+  # The pid first: with nothing to hand over, the answer is already no and asking the URL would
+  # only delay it by the patience above (a refusal that takes 20 s to arrive reads like a hang).
   if [ -z "$pid" ]; then
     printf 'dev-up --preview: nothing here names the process listening on %s, and register_preview needs its pid — the server published no readable %s, and the OS probe says: %s\n' \
       "$APP_PORT" "$(native_path "$SERVER_PID_FILE")" "$(probe_detail "$APP_PORT")" >&2
     exit 1
   fi
+  code="$(preview_url_code)"
   if [ "$code" = "000" ]; then
-    printf 'dev:up --preview: pid %s owns %s but %s never answered, so registering it would show an error page — check %s\n' \
-      "$pid" "$APP_PORT" "$(preview_url)" "$DEV_LOG" >&2
+    printf 'dev:up --preview: pid %s owns %s but %s never answered in %ss, so registering it would show an error page — check %s\n' \
+      "$pid" "$APP_PORT" "$(preview_url)" "$PREVIEW_WAIT" "$DEV_LOG" >&2
     exit 1
   fi
   # The call is still printed — the pid and the URL are current, and the app as it stands
@@ -855,9 +894,19 @@ printf '%s\n' "$PID_DEV" >"$PID_FILE"
 # JSON so the two can never disagree about what to register. It prefers to say "not
 # registerable, and here is why" over printing a call that would fail: a stale or
 # unverified pid is exactly what put a dead preview in front of someone before.
+# What the handoff promises is *this* URL, so this is the URL that gets asked. The readiness
+# probe above answered a different question — "is the app up at all?" — with
+# `/api/schools/public`, and a summary that repeated its status beside the preview call would be
+# claiming the landing page answered when nothing had asked it (on CI, nothing had).
 PREVIEW_URL="$(preview_url)"
 PREVIEW_PID="$PID_DEV"
-PREVIEW_HTTP="$APP_HTTP_CODE"
+if [ "${APP_HTTP_CODE:-000}" = "000" ]; then
+  # Nothing answered the readiness probe at all, so there is nothing to wait for here: asking
+  # the landing page for PREVIEW_WAIT seconds would only delay the report that the stack is down.
+  PREVIEW_HTTP="000"
+else
+  PREVIEW_HTTP="$(preview_url_code)"
+fi
 PREVIEW_READY=1
 PREVIEW_NOTE=""
 if [ -z "$PREVIEW_PID" ]; then
