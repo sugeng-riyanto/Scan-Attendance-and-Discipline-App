@@ -23,6 +23,12 @@ const PUBLIC_PATHS = [
   '/api/terms-content',  // GET is public so /terms page works without login
   '/api/offline-sync',
   '/api/import-template',
+  // The dev server's own identity, asked by the bring-up script to confirm the pid it
+  // published about itself (src/app/api/dev-identity/route.ts). That route refuses to
+  // answer outside a development server, so opening the path here discloses nothing to a
+  // request that would get a 404 anyway — while a bring-up probe, which has no session to
+  // log in with, can still ask.
+  '/api/dev-identity',
   '/_next',
   '/favicon',
   '/models',

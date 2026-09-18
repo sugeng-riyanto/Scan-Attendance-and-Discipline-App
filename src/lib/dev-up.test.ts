@@ -9,14 +9,21 @@
  *
  *  1. the run reports a pid that really owns the app port (the OS's list of
  *     listeners on that port contains it), that the port serves the app, and
- *     that the port is the one package.json's `dev` script pins;
+ *     that the port is the one package.json's `dev` script pins — with both
+ *     services having published that pid about *themselves* at boot, so no pid
+ *     dev-up manages is inferred from the OS probe;
  *  2. a second run starts nothing — same services, same pids, state `reused`,
  *     no "starting" line anywhere in its output;
  *  3. a service the script started and that was then killed is started again
  *     (and a service it did *not* manage is left strictly alone);
  *  4. `npm run dev:down` stops exactly what dev-up started — from the pids dev-up
  *     recorded — and leaves everything else alone, including a live pid it cannot
- *     prove is its own.
+ *     prove is its own;
+ *  5. a running service that predates the source it was started from is reported as
+ *     stale — the file, how long after the start, and the command — while one that does
+ *     not is left in peace, checked both ways against services whose boot markers this
+ *     suite controls. That is the failure mode a preview is most exposed to: a tab
+ *     attached to a process that will never re-read its own config.
  *
  * WHY OPT-IN. It spawns and kills real processes, so it is not part of
  * `bun test`: set DEV_UP_TEST=1. The stack should already be up
@@ -32,12 +39,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
 import {
+  copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
@@ -87,16 +97,50 @@ type ServiceReport = {
   runner?: string | null
   startedByDevUp?: boolean
   supervisor?: number | null
+  /**
+   * Whether this process predates the source it was started from. Absent on services that
+   * run no source of ours (PostgreSQL). `checked: false` means there was no boot marker to
+   * compare against — an older build, or a claim removed by hand — which is not the same
+   * answer as `stale: false`, and the difference is the point of having both.
+   */
+  staleness?: {
+    checked: boolean
+    stale: boolean | null
+    startedAt: string | null
+    changedAt: string | null
+    changedIn: string | null
+    path: string | null
+    restart: string | null
+  }
 }
 type DevUpReport = {
   root: string
   appPort: number
   socketPort: number
   listenerPid: number | null
+  /** Which route named it: `self` (the server's own boot-time report) or `probe`. */
+  listenerPidSource: string | null
+  /** The same question for the socket service, which reports itself the same way. */
+  socketPidSource: string | null
+  /**
+   * The app's boot-time claim, and whether the answer on the port agreed with it. `pid` null
+   * means there was no claim to check; `agrees` null that there was nothing to check it
+   * against — the state a disagreement is only meaningful in contrast to.
+   */
+  listenerClaim: { pid: number | null; agrees: boolean | null }
   appListening: boolean
   pidFile: string
   schema: { state: string }
   services: { postgres: ServiceReport; socket: ServiceReport; dev: ServiceReport }
+  /** The Preview-tab handoff: the URL, the verified pid, and the call to run. */
+  preview: {
+    url: string
+    pid: number | null
+    httpCode: string | null
+    ready: boolean
+    register: { tool: string; url: string; pid: number | null } | null
+    note: string | null
+  }
 }
 
 // ------------------------------------------------------------------ processes
@@ -158,6 +202,11 @@ type DownReport = {
   stateFile: string
   pidFile: string
   pidFileRemoved: boolean
+  /** Each service's own boot-time claim, removed only when this run stopped it. */
+  serverPidFile: string | null
+  serverPidFileRemoved: boolean
+  socketPidFile: string | null
+  socketPidFileRemoved: boolean
   services: Record<string, DownService>
   stopped: string[]
   stillListening: number[]
@@ -450,14 +499,17 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
           `nothing on this platform names the pid listening on :${appPort}, ` +
           `including /proc, which needs nothing installed — ${probeToolsReport(appPort)}`
         announceSkip(
-          `[dev-up.test] SKIPPING every pid-ownership assertion for the app port: ${namingWhy}. ` +
-            `The script reports listenerPid=${report.listenerPid} while the port is served and answers; ` +
-            'saying "no pid" rather than claiming one it cannot verify is the correct answer here, and ' +
-            'the assertions that need a pid mean nothing without one. Everything observable without a ' +
-            'pid is still asserted below and in the cases that follow.',
+          `[dev-up.test] SKIPPING the pid-ownership assertions for the app port: ${namingWhy}. ` +
+            'This platform cannot say who holds the port, so "is the reported pid really the ' +
+            'listener?" has nothing here to check against. That is not the same as having no pid: ' +
+            'the app answers /api/dev-identity about itself, so the script reports one — and that it ' +
+            'is a live pid, and the one both the file and the live answer agree on, is asserted ' +
+            'below rather than skipped. What no test can assert here is that the OS agrees.',
         )
-        expect(report.listenerPid).toBeNull()
-        expect(report.services.dev.pid).toBeNull()
+        expect(report.listenerPid).not.toBeNull()
+        expect(report.services.dev.pid).toBe(report.listenerPid)
+        expect(isAlive(report.listenerPid as number)).toBe(true)
+        expect(report.listenerClaim).toEqual({ pid: report.listenerPid, agrees: true })
       }
 
       // …and whoever owns it must be this app, not a stray process.
@@ -473,21 +525,327 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       // non-zero exit and no output at all when it cannot name one.
       if (!BASH) throw new Error('no bash')
       const pidOnly = run(BASH, [path.join('.zscripts', 'dev-up.sh'), '--pid'])
+        // Keyed off the report, not off naming: with the file in place this answers on
+        // platforms that cannot name the holder at all, which is the point of it.
+        if (report.listenerPid === null) {
+          expect(pidOnly.status).not.toBe(0)
+          expect((pidOnly.stdout ?? '').trim()).toBe('')
+        } else {
+          expect(pidOnly.status).toBe(0)
+          expect((pidOnly.stdout ?? '').trim()).toBe(String(report.listenerPid))
+        }
+
+        // The server states its own pid at boot, and that is the primary route: it
+        // cannot be defeated by a platform where no probe names the holder (which is
+        // what CI manufactures for a service container's port). A run against this
+        // repo must use it — if this fails, the dev server was started before the
+        // app published anything and needs restarting (`npm run dev:down && npm run dev:up`).
+        expect(report.listenerPidSource).toBe('self')
+        const claimed = JSON.parse(
+          readFileSync(path.join(REPO, '.zscripts', 'dev-server.json'), 'utf8'),
+        ) as { pid: number; port: number; cwd: string; startedAt: string }
+        expect(claimed.port).toBe(appPort)
+        expect(claimed.pid).toBe(report.listenerPid as number)
+        expect(claimed.cwd).toBe(REPO)
+        expect(Number.isNaN(Date.parse(claimed.startedAt))).toBe(false)
+        // And the OS agrees with the report, whenever this platform is able to say:
+        // the two routes must not be able to disagree about who is serving.
+        if (namingAvailable) expect(owners).toContain(claimed.pid)
+
+        // …and this is where that pid actually comes from: the answer on the port. A file is
+        // a claim about a moment that has passed; a response comes from whoever holds the
+        // port, so it cannot be stale in that way. The file agreeing with it — same pid, same
+        // port, same checkout — is what makes the file corroboration rather than the source.
+        const answered = (await (
+          await fetch(`http://localhost:${appPort}/api/dev-identity`)
+        ).json()) as Record<string, unknown>
+        expect(answered.service).toBe('dev-server')
+        expect(answered.port).toBe(appPort)
+        expect(answered.cwd).toBe(REPO)
+        expect(answered.pid).toBe(claimed.pid)
+        // No boot timestamp in the live answer, and that is deliberate rather than missing:
+        // Next evaluates instrumentation and route handlers as different module instances
+        // (measured — the published document is not visible to the handler), so the only
+        // timestamp available here would be built per request. A number that moves on every
+        // ask reads like evidence of staleness when it is not, so it is left to the file,
+        // whose whole job is to record one moment. `pid` is this process either way, and that
+        // is the fact being confirmed.
+        expect(Object.keys(answered)).not.toContain('startedAt')
+        expect(report.listenerClaim).toEqual({ pid: claimed.pid, agrees: true })
+
+        // The Preview-tab handoff. It has to be the SAME pid the OS named, in the one
+        // form a preview needs: handing over a wrapper pid, or a "null" that looks like
+        // a number, is the mistake this suite exists to catch in the first place.
+        const previewOnly = run(BASH, [path.join('.zscripts', 'dev-up.sh'), '--preview'])
+      const expectedCall = `register_preview({ url: "http://localhost:${appPort}/", pid: ${report.listenerPid} })`
+      expect(report.preview.url).toBe(`http://localhost:${appPort}/`)
       if (namingAvailable) {
-        expect(pidOnly.status).toBe(0)
-        expect((pidOnly.stdout ?? '').trim()).toBe(String(report.listenerPid))
+        expect(previewOnly.status).toBe(0)
+        expect((previewOnly.stdout ?? '').trim()).toBe(expectedCall)
+        expect(report.preview.ready).toBe(true)
+        expect(report.preview.pid).toBe(report.listenerPid)
+        expect(report.preview.register).toEqual({
+          tool: 'register_preview',
+          url: `http://localhost:${appPort}/`,
+          pid: report.listenerPid,
+        })
+        // The human summary says it in the same words, so nobody has to work it out.
+        expect(first.stderr).toContain(`preview: ${expectedCall}`)
       } else {
-        expect(pidOnly.status).not.toBe(0)
-        expect((pidOnly.stdout ?? '').trim()).toBe('')
+        // No pid to stand behind: refuse, with the reason, instead of printing a call
+        // that would register a dead preview.
+        expect(previewOnly.status).not.toBe(0)
+        expect((previewOnly.stdout ?? '').trim()).toBe('')
+        expect(report.preview.ready).toBe(false)
+        expect(report.preview.register).toBeNull()
+        expect(report.preview.note).toBeTruthy()
+        expect(first.stderr).toContain('preview: not registerable')
       }
+
+      // The socket service reports itself exactly as the app does, so its pid is not
+      // inferred either — same strictness, and the same requirement that the stack was
+      // brought up by a dev-up that knows about the reporting.
+      expect(report.socketPidSource).toBe('self')
+      const socketClaim = JSON.parse(
+        readFileSync(path.join(REPO, '.zscripts', 'attendance-socket.json'), 'utf8'),
+      ) as { service: string; pid: number; port: number; cwd: string; startedAt: string }
+      expect(socketClaim.service).toBe('attendance-socket')
+      expect(socketClaim.port).toBe(report.socketPort)
+      expect(socketClaim.cwd).toBe(path.join(REPO, 'mini-services', 'attendance-socket'))
+      expect(socketClaim.pid).toBe(report.services.socket.pid as number)
+      expect(Number.isNaN(Date.parse(socketClaim.startedAt))).toBe(false)
+      // …and, whenever this platform names the holder at all, the OS agrees with it —
+      // the two services must not be able to disagree about who is serving.
+      const socketOwners = listenerPids(report.socketPort)
+      if (socketOwners.length > 0) expect(socketOwners).toContain(socketClaim.pid)
 
       // Every service is up after a bring-up run, not just the app.
       expect(listenerPids(report.socketPort).length).toBeGreaterThan(0)
       expect(['reused', 'started']).toContain(report.services.socket.state)
       expect(['reused', 'external']).toContain(report.services.postgres.state)
       expect(report.schema.state).toBe('in-sync')
+
+      // Both services' age was checked against their own boot marker — which is what makes
+      // it a check rather than a guess — and its two halves agree whichever way it came out.
+      // A stack someone left running with an edited `.env.local` is a legitimate answer here
+      // (and the next case asserts the comparison itself); `checked: false` is the state that
+      // would mean there was nothing to compare against, which is not true of a stack this
+      // suite brought up.
+      for (const name of ['socket', 'dev'] as const) {
+        const staleness = report.services[name].staleness
+        expect(staleness?.checked).toBe(true)
+        expect(staleness?.startedAt).toBeTruthy()
+        expect(staleness?.stale).toBe(Boolean(staleness?.path))
+      }
     },
-    300_000,
+      300_000,
+    )
+
+    it(
+      'takes the live answer over the file, discards a stale claim, and refuses an unconfirmable one',
+      async () => {
+        if (!BASH) throw new Error('no bash')
+
+        // `--pid` answers without starting anything, so it is the cheapest way to ask
+        // "which route did that pid come from?". A scratch log directory keeps these cases
+        // off the live `.zscripts/dev-server.json`, while ROOT stays the real checkout, so
+        // the app under discussion is the real one — which is what makes the answer here
+        // independently knowable: it is what the port itself says, fetched in this process.
+        const logDir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-published-'))
+        helperDirs.push(logDir)
+        const file = path.join(logDir, 'dev-server.json')
+        const env = { DEV_UP_LOG_DIR: logDir }
+        const script = path.join('.zscripts', 'dev-up.sh')
+        const live = listenerPids(appPort)[0] ?? null
+        const answeredPid = (await (
+          await fetch(`http://localhost:${appPort}/api/dev-identity`)
+        ).json()) as { pid: number }
+        const answer = String(answeredPid.pid)
+
+        const claim = (over: Record<string, unknown>) =>
+          writeFileSync(
+            file,
+            JSON.stringify({
+              service: 'dev-server',
+              pid: process.pid,
+              port: appPort,
+              cwd: REPO,
+              startedAt: new Date().toISOString(),
+              node: process.version,
+              ...over,
+            }),
+          )
+        const askPid = () => {
+          const res = run(BASH, [script, '--pid'], env)
+          return { status: res.status as number, pid: (res.stdout ?? '').trim(), stderr: res.stderr ?? '' }
+        }
+        // Every case below that keeps the app answering has to come back to the same pid:
+        // the one the port itself reported. Whatever the file says is secondary now.
+        const expectLiveAnswer = (got: { status: number; pid: string }) => {
+          expect(got.status).toBe(0)
+          expect(got.pid).toBe(answer)
+        }
+
+        // 1. No file at all: the answer on the port is still the answer. This is the path a
+        //    server that predates the reporting, or one started outside `npm run dev` on a
+        //    platform the probe cannot name, now takes — it used to end in "no pid".
+        expect(existsSync(file)).toBe(false)
+        expectLiveAnswer(askPid())
+
+        // 2. Claims that fail their own checks are ignored, one at a time.
+        claim({ port: appPort + 1 })
+        expectLiveAnswer(askPid())
+        claim({ cwd: path.join(os.tmpdir(), 'another-checkout') })
+        expectLiveAnswer(askPid())
+        claim({ pid: 999_999 })
+        expectLiveAnswer(askPid())
+
+        // 3. A claim that passes every check the file can be held to — this port, this
+        //    checkout, a pid that is alive — and is still not the server. That is the case a
+        //    file cannot detect on its own (a service killed hard, its pid later recycled),
+        //    and the reason the live route exists: the process holding the port says
+        //    otherwise, so the claim is discarded rather than believed.
+        claim({ pid: process.pid })
+        const stale = askPid()
+        expectLiveAnswer(stale)
+        expect(stale.pid).not.toBe(String(process.pid))
+        expect(stale.stderr).toContain('treating that claim as stale')
+
+        // …and the report says the same thing in machine-readable form, so a caller reading
+        // `--json` learns the file was stale rather than having to parse a warning.
+        const staleRun = devUp(['--no-schema'], env)
+        expect(staleRun.report.listenerPid).toBe(answeredPid.pid)
+        expect(staleRun.report.listenerClaim).toEqual({ pid: process.pid, agrees: false })
+        expect(staleRun.report.listenerPidSource).toBe('self')
+        expect(staleRun.stderr).toContain('treating that claim as stale')
+
+        // 4. A claim that agrees is corroboration, not the source: the same pid either way,
+        //    and the report records that the two routes were compared and agreed. The suite's
+        //    first case asserts this of the live stack; here it is asserted of a file this
+        //    test wrote, which is what makes it a statement about the comparison rather than
+        //    about the app's own bookkeeping.
+        claim({ pid: Number(answer) })
+        const agreedRun = devUp(['--no-schema'], env)
+        expect(agreedRun.report.listenerPid).toBe(answeredPid.pid)
+        expect(agreedRun.report.listenerClaim).toEqual({ pid: Number(answer), agrees: true })
+        expect(agreedRun.stderr).not.toContain('stale')
+
+        // 5. Nothing on the port answers its identity route — an older build, or a different
+        //    program entirely — so no claim can be confirmed, and an unconfirmable claim is
+        //    not believed even when every check on the file itself passes. The answer has to
+        //    come from the probe, or be "no pid": never the file. A scratch checkout is used
+        //    here because the point is a port the app does not answer on.
+        const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-unconfirmed-'))
+        const silentLogs = mkdtempSync(path.join(os.tmpdir(), 'dev-up-unconfirmed-logs-'))
+        helperDirs.push(dir, silentLogs)
+        mkdirSync(path.join(dir, '.zscripts'), { recursive: true })
+        for (const name of ['dev-up.sh', 'dev-down.sh', 'lib-stack.sh']) {
+          copyFileSync(path.join(REPO, '.zscripts', name), path.join(dir, '.zscripts', name))
+        }
+        const stubPort = freePort(3360)
+        writeFileSync(
+          path.join(dir, 'package.json'),
+          JSON.stringify({ scripts: { dev: `next dev -p ${stubPort}` } }),
+        )
+        // Answers HTTP, but not with an identity document: exactly what a build without the
+        // route (or an unrelated server) looks like to the confirmation step.
+        const stub = startHelper(
+          `require("http").createServer((q, s) => { s.statusCode = 404; s.end("not here") }).listen(${stubPort}, "127.0.0.1")`,
+        )
+        expect(await waitFor(() => listenerPids(stubPort).length > 0, 15_000)).toBe(true)
+        writeFileSync(
+          path.join(silentLogs, 'dev-server.json'),
+          JSON.stringify({
+            service: 'dev-server',
+            pid: process.pid, // alive, and not what is serving the port
+            port: stubPort, // and a claim about the very port being asked
+            cwd: dir,
+            startedAt: new Date().toISOString(),
+            node: process.version,
+          }),
+        )
+        const unconfirmed = run(
+          BASH,
+          [path.join('.zscripts', 'dev-up.sh'), '--pid'],
+          { DEV_UP_LOG_DIR: silentLogs },
+          dir,
+        )
+        const probed = listenerPids(stubPort)[0] ?? null
+        if (probed === null) {
+          announceSkip(
+            `[dev-up.test] SKIPPING the last half of the unconfirmable-claim case: nothing on ` +
+              `this platform names the pid listening on :${stubPort}, so there is no pid for the ` +
+              `probe to fall back to — but the claim naming ${process.pid} must still not be it, ` +
+              `which is asserted first below. ${probeToolsReport(stubPort)}`,
+          )
+          expect((unconfirmed.stdout ?? '').trim()).not.toBe(String(process.pid))
+        } else {
+          expect(unconfirmed.status).toBe(0)
+          expect((unconfirmed.stdout ?? '').trim()).toBe(String(probed))
+          expect((unconfirmed.stdout ?? '').trim()).not.toBe(String(process.pid))
+        }
+        expect(isAlive(stub)).toBe(true)
+      },
+      180_000,
+    )
+
+    it(
+      'refuses a preview call it cannot stand behind, and names the pid when it can',
+    async () => {
+      if (!BASH) throw new Error('no bash')
+
+      // A scratch checkout — the same two scripts, a package.json pinning a port of
+      // its own, no stack — so the three possible answers are exercised without
+      // touching the live 3000/3003: no listener at all, a listener that never
+      // speaks HTTP, and one that really serves.
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-preview-'))
+      const logDir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-preview-logs-'))
+      helperDirs.push(dir, logDir)
+      mkdirSync(path.join(dir, '.zscripts'), { recursive: true })
+      for (const file of ['dev-up.sh', 'dev-down.sh', 'lib-stack.sh']) {
+        copyFileSync(path.join(REPO, '.zscripts', file), path.join(dir, '.zscripts', file))
+      }
+      const port = freePort(3451)
+      writeFileSync(
+        path.join(dir, 'package.json'),
+        JSON.stringify({ scripts: { dev: `next dev -p ${port}` } }),
+      )
+      const env = { DEV_UP_LOG_DIR: logDir }
+      const script = path.join('.zscripts', 'dev-up.sh')
+
+      // 1. Nothing is listening: there is no pid, so there is no call to print.
+      const nothing = run(BASH, [script, '--preview'], env, dir)
+      expect(nothing.status).not.toBe(0)
+      expect((nothing.stdout ?? '').trim()).toBe('')
+      expect(nothing.stderr).toContain(`nothing here names the process listening on ${port}`)
+
+      // 2. A port that accepts TCP and never answers HTTP: a pid, but registering it
+      //    would put an error page in front of someone, so it is refused too.
+      startHelper(listenOn(port))
+      await waitFor(() => listenerPids(port).length > 0, 15_000)
+      const silent = run(BASH, [script, '--preview'], env, dir)
+      expect(silent.status).not.toBe(0)
+      expect((silent.stdout ?? '').trim()).toBe('')
+      expect(silent.stderr).toContain('never answered')
+
+      // 3. Now it really serves. The printed call must name this port and the pid the
+      //    OS itself lists for it — not the helper's parent, not a bare "null".
+      const silentPid = listenerPids(port)[0]
+      if (silentPid) killTree(silentPid)
+      await waitFor(() => listenerPids(port).length === 0, 15_000)
+      const servingPid = startHelper(
+        `require("http").createServer((q, s) => s.end("ok")).listen(${port}, "127.0.0.1")`,
+      )
+      await waitFor(() => listenerPids(port).length > 0, 15_000)
+      expect(listenerPids(port)).toContain(servingPid)
+
+      const ready = run(BASH, [script, '--preview'], env, dir)
+      expect(ready.status).toBe(0)
+      expect((ready.stdout ?? '').trim()).toBe(
+        `register_preview({ url: "http://localhost:${port}/", pid: ${servingPid} })`,
+      )
+    },
+    120_000,
   )
 
   it(
@@ -544,6 +902,16 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       expect(started.report.schema.state).toBe('skipped')
       expect(started.report.services.socket.state).toBe('started')
       expect(['bun', 'node']).toContain(started.report.services.socket.runner ?? '')
+
+      // The scratch service reports itself into the scratch log directory, not the live
+      // one: the override carries the claim with it, so neither stack can read the other's.
+      expect(started.report.socketPidSource).toBe('self')
+      const scratchClaim = JSON.parse(
+        readFileSync(path.join(scratchDir, 'attendance-socket.json'), 'utf8'),
+      ) as { pid: number; port: number; cwd: string }
+      expect(scratchClaim.port).toBe(scratchPort)
+      expect(scratchClaim.cwd).toBe(path.join(REPO, 'mini-services', 'attendance-socket'))
+      expect(scratchClaim.pid).toBe(started.report.services.socket.pid as number)
 
       const firstPid = started.report.services.socket.pid
       socketPidNameable = firstPid !== null
@@ -654,6 +1022,11 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       expect(down.report.stopped).toEqual(['socket'])
       expect(down.report.services.socket.action).toBe('stopped')
       expect(down.report.services.socket.pid).toBe(stoppedPid)
+      // The claim goes with the service it describes. A killed service cannot clean up
+      // after itself, and a stale claim naming a since-recycled pid is the one way the
+      // file route can be wrong — so removing it is part of stopping it.
+      expect(down.report.socketPidFileRemoved).toBe(true)
+      expect(existsSync(path.join(scratchDir, 'attendance-socket.json'))).toBe(false)
       expect(down.report.services.postgres.action).toBe('left-alone')
       expect(down.report.services.dev.action).toBe('left-alone')
 
@@ -814,4 +1187,215 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
     expect(down.report.stopped).toEqual([])
     expect(listenerPids(appPort).length).toBeGreaterThan(0)
   })
+
+  it(
+    'says when a running service predates the source it was started from',
+    async () => {
+      if (!BASH) throw new Error('no bash')
+
+      // A scratch checkout whose two services are helpers this test controls — including one
+      // that answers the app's identity route about itself — so the only variable left is
+      // time: the boot marker each claim carries, against the mtimes of the files that
+      // service was started from. Touching the live stack's source or its claims is not an
+      // option: a real developer is watching those.
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-stale-'))
+      const logDir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-stale-logs-'))
+      helperDirs.push(dir, logDir)
+      mkdirSync(path.join(dir, '.zscripts'), { recursive: true })
+      // dev-up requires the socket package directory to exist; the port it probes belongs to a
+      // helper, so nothing is ever started from it.
+      const socketDir = path.join(dir, 'mini-services', 'attendance-socket')
+      mkdirSync(socketDir, { recursive: true })
+      for (const file of ['dev-up.sh', 'dev-down.sh', 'lib-stack.sh']) {
+        copyFileSync(path.join(REPO, '.zscripts', file), path.join(dir, '.zscripts', file))
+      }
+      const port = freePort(3480)
+      const socketPort = freePort(3490)
+      writeFileSync(
+        path.join(dir, 'package.json'),
+        JSON.stringify({ scripts: { dev: `next dev -p ${port}` } }),
+      )
+      // This checkout was not created an hour ago, so the one restart-required file it starts
+      // with is dated back to before the boot markers below. What this case varies is time,
+      // and a `package.json` written moments ago is newer than any marker meant to precede it.
+      const twoHoursAgo = new Date(Date.now() - 7_200_000)
+      utimesSync(path.join(dir, 'package.json'), twoHoursAgo, twoHoursAgo)
+
+      // Whoever answers a port is the process holding it, so a helper that answers the
+      // identity route truthfully takes the app's place here: the pid dev-up reports is this
+      // helper's own, and the claim below is confirmed against that live answer exactly as a
+      // real server's claim is.
+      const appHelper = startHelper(
+        [
+          'const http = require("http");',
+          'http.createServer((q, s) => {',
+          '  if (q.url.startsWith("/api/dev-identity")) {',
+          '    s.setHeader("content-type", "application/json");',
+          '    s.end(JSON.stringify({ service: "dev-server", pid: process.pid, port: ' +
+            `${port}, cwd: ${JSON.stringify(dir)}, node: process.version }));`,
+          '  } else { s.end("ok") }',
+          `}).listen(${port}, "127.0.0.1");`,
+          'setInterval(() => {}, 1000);',
+        ].join('\n'),
+      )
+      // The socket port answers too, so dev-up's handshake probe is a fast 200 rather than a
+      // curl timeout; the service there is never the subject of these assertions.
+      const socketHelper = startHelper(
+        `require("http").createServer((q, s) => s.end("ok")).listen(${socketPort}, "127.0.0.1"); ` +
+          'setInterval(() => {}, 1000)',
+      )
+      expect(await waitFor(() => listenerPids(port).length > 0, 15_000)).toBe(true)
+      expect(await waitFor(() => listenerPids(socketPort).length > 0, 15_000)).toBe(true)
+      expect(listenerPids(port)).toContain(appHelper)
+      expect(listenerPids(socketPort)).toContain(socketHelper)
+
+      const env = { DEV_UP_LOG_DIR: logDir, SOCKET_PORT: String(socketPort) }
+      const script = path.join('.zscripts', 'dev-up.sh')
+      const devUpIn = (args: string[] = []) => {
+        const res = run(BASH, [script, '--json', ...args], env, dir)
+        const stdout = res.stdout ?? ''
+        const start = stdout.indexOf('{')
+        if (start === -1) {
+          throw new Error(
+            `the scratch dev-up exited ${res.status} with no JSON:\n${(res.stderr ?? '').slice(-2000)}`,
+          )
+        }
+        return {
+          report: JSON.parse(stdout.slice(start)) as DevUpReport,
+          stdout,
+          stderr: res.stderr ?? '',
+          status: res.status ?? -1,
+        }
+      }
+
+      // Both claims: about these helpers, in this checkout, written an hour ago.
+      const bootedAnHourAgo = new Date(Date.now() - 3_600_000).toISOString()
+      const devClaim = (over: Record<string, unknown> = {}) =>
+        writeFileSync(
+          path.join(logDir, 'dev-server.json'),
+          JSON.stringify({
+            service: 'dev-server',
+            pid: appHelper,
+            port,
+            cwd: dir,
+            startedAt: bootedAnHourAgo,
+            node: process.version,
+            ...over,
+          }),
+        )
+      const socketClaim = (over: Record<string, unknown> = {}) =>
+        writeFileSync(
+          path.join(logDir, 'attendance-socket.json'),
+          JSON.stringify({
+            service: 'attendance-socket',
+            pid: socketHelper,
+            port: socketPort,
+            cwd: socketDir,
+            startedAt: bootedAnHourAgo,
+            node: process.version,
+            ...over,
+          }),
+        )
+
+      // 1. Nothing has changed since either service booted: the comparison ran, and found
+      //    nothing. This is the answer that must not be confused with "could not tell".
+      devClaim()
+      socketClaim()
+      const current = devUpIn(['--no-schema'])
+      expect(current.status).toBe(0)
+      expect(current.report.services.dev.staleness).toEqual({
+        checked: true,
+        stale: false,
+        startedAt: bootedAnHourAgo,
+        changedAt: null,
+        changedIn: null,
+        path: null,
+        restart: null,
+      })
+      expect(current.report.services.socket.staleness?.checked).toBe(true)
+      expect(current.stderr).not.toContain('still runs the code from before')
+
+      // 2. A restart-required input of the app, written now. `.env.local` is the canonical
+      //    case — the process captured what it read at import, so a running server cannot
+      //    pick the new value up — and it is asserted by name, because *which* files count
+      //    is the policy this case exists to pin.
+      writeFileSync(path.join(dir, '.env.local'), 'SOCKET_RELAY_TOKEN=stale-test\n')
+      const stale = devUpIn(['--no-schema'])
+      expect(stale.report.services.dev.staleness).toMatchObject({
+        checked: true,
+        stale: true,
+        path: '.env.local',
+        startedAt: bootedAnHourAgo,
+        restart: 'npm run dev:down && npm run dev:up',
+      })
+      expect(stale.report.services.dev.staleness?.changedAt).toBeTruthy()
+      expect(stale.report.services.dev.staleness?.changedIn).toMatch(/^[0-9]+[dhms]/)
+      // Said on stderr, with the file, the reason and the command — not just a flag…
+      expect(stale.stderr).toContain('.env.local')
+      expect(stale.stderr).toContain('still runs the code from before')
+      expect(stale.stderr).toContain('npm run dev:down && npm run dev:up')
+      // …and in the summary, beside the preview call it is a caveat on.
+      expect(stale.stderr).toMatch(/stale:\s+the dev server on :\d+/)
+      // The socket service is stale for the same reason and from the same file: dev-up starts
+      // it with `--env-file=.env.local`, so its environment came from there too.
+      expect(stale.report.services.socket.staleness).toMatchObject({
+        checked: true,
+        stale: true,
+        path: '.env.local',
+      })
+
+      // 3. `--preview` still prints the call — the pid and the URL are current, and watching
+      //    the app as it stands is usually what someone wants — and says the same thing.
+      const preview = run(BASH, [script, '--preview'], env, dir)
+      expect(preview.status).toBe(0)
+      expect((preview.stdout ?? '').trim()).toBe(
+        `register_preview({ url: "http://localhost:${port}/", pid: ${appHelper} })`,
+      )
+      expect(preview.stderr).toContain('.env.local')
+
+      // 4. The same server, booted after the change: nothing to report. Time is the only
+      //    difference, which is what makes this a statement about the comparison rather than
+      //    about the files.
+      devClaim({ startedAt: new Date().toISOString() })
+      const fresh = devUpIn(['--no-schema'])
+      expect(fresh.report.services.dev.staleness).toMatchObject({
+        checked: true,
+        stale: false,
+        path: null,
+      })
+      expect(fresh.stderr).not.toMatch(/stale:\s+the dev server on/)
+      // …and only the app: the socket service is still behind `.env.local`, which is the same
+      // file for a different reason. One verdict per service, not one for the stack.
+      expect(fresh.stderr).toMatch(/stale:\s+the socket service on/)
+
+      // 5. No boot marker is not the same answer as "current": there is nothing to compare
+      //    against, and the report says so instead of reassuring anyone.
+      devClaim({ startedAt: undefined })
+      const unknown = devUpIn(['--no-schema'])
+      expect(unknown.report.services.dev.staleness).toEqual({
+        checked: false,
+        stale: null,
+        startedAt: null,
+        changedAt: null,
+        changedIn: null,
+        path: null,
+        restart: null,
+      })
+      expect(unknown.stderr).not.toMatch(/stale:\s+the dev server on/)
+
+      // 6. The other service, and the other reason. No config file is involved here: the
+      //    socket mini-service is executed from source with no watcher at all, so a file
+      //    inside its own directory leaves a running copy behind its own code.
+      writeFileSync(path.join(socketDir, 'index.ts'), '// the source this running copy was started from\n')
+      const staleSocket = devUpIn(['--no-schema'])
+      expect(staleSocket.report.services.socket.staleness).toMatchObject({
+        checked: true,
+        stale: true,
+        path: 'mini-services/attendance-socket/index.ts',
+      })
+      expect(staleSocket.stderr).toMatch(/stale:\s+the socket service on :\d+/)
+      expect(staleSocket.stderr).toContain('no watcher')
+    },
+    300_000,
+  )
 })

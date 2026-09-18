@@ -64,6 +64,9 @@ fi
 
 PG_DIR="$ROOT/local-pg"
 PG_CTL="$PG_DIR/pgsql/bin/pg_ctl$EXE"
+# Where the socket service runs from, which is the directory its own claim about itself
+# names — so a claim left by a service started elsewhere is not this run's to delete.
+SOCKET_DIR="$ROOT/mini-services/attendance-socket"
 
 # -------------------------------------------------------------------- the record
 
@@ -219,8 +222,31 @@ fi
 # The pid file describes the app-port listener only, so it is removed only when
 # that listener is known to be gone; a service this script left alone keeps it.
 PIDFILE_REMOVED=false
+SERVER_PIDFILE_REMOVED=false
+SOCKET_PIDFILE_REMOVED=false
 if [ -f "$PID_FILE" ] && { [ "$ACT_DEV" = "stopped" ] || [ "$ACT_DEV" = "already-down" ]; }; then
   rm -f "$PID_FILE" && PIDFILE_REMOVED=true
+fi
+
+# Each service's own report goes with it — but only the claim that belongs to the process
+# this run stopped, so one written by a different service (another checkout, another port)
+# is left where it is. Removing them here matters because a killed service cannot clean up
+# after itself: its exit handler never runs, and a stale claim naming a since-recycled pid
+# is the one way the file route can be wrong. Same pids, same reason, as the pid file above.
+#
+# A claim left by a service that died on its own is not removed here (there is no recorded
+# pid that still matches one), but it is also harmless: the next `dev:up` rejects it unless
+# the pid is alive, and the next boot overwrites it.
+if [ -f "$SERVER_PID_FILE" ] && [ -n "$DEV_PID" ] && [ -n "$DEV_PORT" ] && \
+   [ "$ACT_DEV" = "stopped" ] && \
+   [ "$(published_pid "$SERVER_PID_FILE" "$DEV_PORT" "$ROOT" 0)" = "$DEV_PID" ]; then
+  rm -f "$SERVER_PID_FILE" && SERVER_PIDFILE_REMOVED=true
+fi
+
+if [ -f "$SOCKET_PID_FILE" ] && [ -n "$SOCKET_PID_SEEN" ] && [ -n "$SOCKET_PORT_SEEN" ] && \
+   [ "$ACT_SOCKET" = "stopped" ] && \
+   [ "$(published_pid "$SOCKET_PID_FILE" "$SOCKET_PORT_SEEN" "$SOCKET_DIR" 0)" = "$SOCKET_PID_SEEN" ]; then
+  rm -f "$SOCKET_PID_FILE" && SOCKET_PIDFILE_REMOVED=true
 fi
 
 # ------------------------------------------------------------------- the report
@@ -249,6 +275,10 @@ done
 
 build_down_report() {
   REP_ROOT="$ROOT" REP_STATE_FILE="$STATE_FILE" REP_PID_FILE="$PID_FILE"
+  REP_SERVER_PID_FILE="$SERVER_PID_FILE"
+  REP_SERVER_PIDFILE_REMOVED="$SERVER_PIDFILE_REMOVED"
+  REP_SOCKET_PID_FILE="$SOCKET_PID_FILE"
+  REP_SOCKET_PIDFILE_REMOVED="$SOCKET_PIDFILE_REMOVED"
   REP_WRITTEN="$(date -u +%FT%TZ)" REP_PIDFILE_REMOVED="$PIDFILE_REMOVED" REP_STILL="$STILL"
   REP_LEAKED="$LEAKED"
   REP_DEV_ACTION="$ACT_DEV" REP_DEV_REASON="$WHY_DEV" REP_DEV_PORT="$DEV_PORT" REP_DEV_PID="$DEV_PID"
@@ -256,6 +286,8 @@ build_down_report() {
   REP_SOCKET_PORT="$SOCKET_PORT_SEEN" REP_SOCKET_PID="$SOCKET_PID_SEEN"
   REP_PG_ACTION="$ACT_PG" REP_PG_REASON="$WHY_PG" REP_PG_PORT="$PG_PORT" REP_PG_PID="$PG_PID"
   export REP_ROOT REP_STATE_FILE REP_PID_FILE REP_WRITTEN REP_PIDFILE_REMOVED REP_STILL REP_LEAKED
+  export REP_SERVER_PID_FILE REP_SERVER_PIDFILE_REMOVED
+  export REP_SOCKET_PID_FILE REP_SOCKET_PIDFILE_REMOVED
   export REP_DEV_ACTION REP_DEV_REASON REP_DEV_PORT REP_DEV_PID
   export REP_SOCKET_ACTION REP_SOCKET_REASON REP_SOCKET_PORT REP_SOCKET_PID
   export REP_PG_ACTION REP_PG_REASON REP_PG_PORT REP_PG_PID
@@ -276,6 +308,13 @@ build_down_report() {
       stateFile: e.REP_STATE_FILE,
       pidFile: e.REP_PID_FILE,
       pidFileRemoved: e.REP_PIDFILE_REMOVED === "true",
+      // The boot-time reports the services publish about themselves, each removed only
+      // when this run stopped the very process it describes (null path: no such file
+      // involved).
+      serverPidFile: e.REP_SERVER_PID_FILE || null,
+      serverPidFileRemoved: e.REP_SERVER_PIDFILE_REMOVED === "true",
+      socketPidFile: e.REP_SOCKET_PID_FILE || null,
+      socketPidFileRemoved: e.REP_SOCKET_PIDFILE_REMOVED === "true",
       services,
       stopped: Object.keys(services).filter((n) => services[n].action === "stopped"),
       // stillListening: every recorded port still served (services left alone are
@@ -313,6 +352,12 @@ print_summary() {
   printf '%s\n' "──────────────────────────────────────────────────────────────"
   if [ "$PIDFILE_REMOVED" = true ]; then
     printf '  %s\n' "removed $(native_path "$PID_FILE") (its listener is gone)"
+  fi
+  if [ "$SERVER_PIDFILE_REMOVED" = true ]; then
+    printf '  %s\n' "removed $(native_path "$SERVER_PID_FILE") (and the claim it made about the server)"
+  fi
+  if [ "$SOCKET_PIDFILE_REMOVED" = true ]; then
+    printf '  %s\n' "removed $(native_path "$SOCKET_PID_FILE") (and the claim it made about the socket service)"
   fi
   if [ -n "$LEAKED" ]; then
     printf '  %s\n' "STILL SERVING after a forced stop: ${LEAKED% }"

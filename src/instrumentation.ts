@@ -9,9 +9,18 @@
 // (Prisma uses node:* modules, which would fail edge module evaluation).
 //
 // Interval in minutes: SUBSCRIPTION_ALERT_INTERVAL_MIN (default 15).
+//
+// The same hook also publishes this server's own identity (pid, port, checkout) for the
+// bring-up script, which otherwise has to ask the OS which pid owns the port — a question
+// with no answer when the listener's owner is not readable. First thing in here, because
+// it is what a caller waiting for the server is looking for; see
+// `@/lib/dev-server-identity` for why it is a file rather than a probe.
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+
+  const { publishDevServerIdentity } = await import('@/lib/dev-server-identity')
+  publishDevServerIdentity()
 
   const { db } = await import('@/lib/db')
   const { emitSocketEvent } = await import('@/lib/socket-server')

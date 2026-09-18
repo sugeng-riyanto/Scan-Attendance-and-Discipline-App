@@ -1,5 +1,13 @@
 import { Server } from 'socket.io';
 import { timingSafeEqual } from 'node:crypto';
+import path from 'node:path';
+
+// The boot-time self-report the bring-up script reads instead of asking the OS which pid
+// owns :3003 — the same mechanism the dev server uses (`src/lib/service-identity.ts`).
+// The `.ts` extension is required, not stylistic: `dev-up` runs this file straight from
+// source (`bun index.ts`, or plain `node index.ts` under node's type stripping) and node
+// resolves a relative import only by its exact path.
+import { publishServiceIdentity } from '../../src/lib/service-identity.ts';
 
 // The port the Next server's relay dials (SOCKET_SERVER_URL, default :3003).
 // SOCKET_PORT overrides it so a second, scratch instance can run beside a live
@@ -59,6 +67,17 @@ const io = new Server(PORT, {
 io.use((socket, next) => {
   socket.data.trusted = tokenMatches(socket.handshake.auth?.token);
   next();
+});
+
+// Say which pid is serving this port, in a file `dev-up` can read (SOCKET_PID_FILE), so
+// the bring-up no longer infers it from a probe the kernel may refuse to answer — the
+// case that made both services report themselves. Nothing is written in production, or
+// when no port could be established; the shell keeps the probe as its fallback either way.
+publishServiceIdentity({
+  service: 'attendance-socket',
+  envVar: 'SOCKET_PID_FILE',
+  defaultPath: path.join('.zscripts', 'attendance-socket.json'),
+  port: PORT,
 });
 
 console.log(`Socket.io server running on port ${PORT}`);
@@ -152,6 +171,15 @@ io.on('connection', (socket) => {
   socket.on('terms:remind', (data) => {
     io.emit('terms:remind', data);
     console.log('Terms reminder event: v' + (data?.version ?? '?'), 'for', data?.userIds?.length ?? 0, 'user(s)');
+  });
+
+  // Broadcast by the Next server after an administrator records T&C acceptance
+  // for the school (/api/terms-accept-bulk). An open acceptance panel refetches,
+  // so the list never disagrees with the database. Like the reminder above, the
+  // emit is dropped here without a handler — this relay forwards names it knows.
+  socket.on('terms:bulk-accepted', (data) => {
+    io.emit('terms:bulk-accepted', data);
+    console.log('Terms bulk-accepted event: v' + (data?.version ?? '?'), 'for', data?.updated ?? 0, 'user(s) by', data?.acceptedBy ?? '?');
   });
 
   socket.on('disconnect', () => {

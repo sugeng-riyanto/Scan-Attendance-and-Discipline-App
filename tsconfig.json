@@ -13,6 +13,13 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // The socket mini-service (`mini-services/attendance-socket/index.ts`) runs straight
+    // from source — `bun index.ts`, or plain `node index.ts` under node's type stripping —
+    // and node resolves a relative import only by its exact path, so that one import has to
+    // spell the `.ts` extension. This is the flag that makes the checker agree; `noEmit`
+    // (above) is what it requires. Only runtimes that read source directly need it; every
+    // other import in the tree stays extensionless.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

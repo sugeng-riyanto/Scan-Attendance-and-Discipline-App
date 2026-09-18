@@ -89,20 +89,74 @@ npm run dev:up          # or: bash .zscripts/dev-up.sh
 
 It starts PostgreSQL (when `DATABASE_URL` points at a local host), syncs the Prisma
 schema, starts the socket service, then the dev server — and finishes by printing the
-**pid that owns the listening socket on port 3000**. That is deliberately not the pid
-of the `npm`/`next` wrapper it spawned: the listener is a grandchild, and reporting a
-wrapper pid is how a live preview ends up registered against a process that is not
-serving anything.
+**pid that is serving on port 3000**. That is deliberately not the pid of the
+`npm`/`next` wrapper it spawned: the listener is a grandchild, and reporting a wrapper
+pid is how a live preview ends up registered against a process that is not serving
+anything. The server states that pid about itself rather than leaving the script to infer
+it: at boot it writes `.zscripts/dev-server.json` (pid, port, checkout, when), and
+`dev:up` reads that, falling back to probing the OS only when the file is missing or
+names another port, another checkout, or a pid that is gone — the case a probe cannot
+answer at all, since the kernel names a socket's holder only when it belongs to a user
+you may read. Which route answered is printed, and carried in `--json` as
+`listenerPidSource`.
+
+**Both services report themselves, through one implementation.** The socket mini-service
+publishes the same document about itself when it boots — same fields, same checks, same
+fallback — so neither pid `dev:up` reports is inferred from the OS any more. The shared
+mechanism lives in `src/lib/service-identity.ts`; the app reaches it from
+`src/instrumentation.ts` and writes `.zscripts/dev-server.json`, while the socket writes
+`.zscripts/attendance-socket.json`. Which route named the socket's pid is `socketPidSource`
+in `--json`, and the summary says it in words.
+
+**The app is also asked live, and the file only corroborates.** A file describes a moment that
+has passed: a server killed hard cannot delete its own claim, and if that pid is later recycled
+by an unrelated process the claim still passes every check it can make on itself. An answer
+cannot be stale that way — whoever answers on a port *is* the process holding it — so the app
+serves its identity at `GET /api/dev-identity`, and `dev:up` takes the pid from that answer,
+discarding the file's claim when the two disagree (warning, plus `listenerClaim: {pid, agrees}`
+in `--json`). The route answers only from a development server and only to a loopback request;
+it is in the middleware's public paths because a bring-up probe has no session to log in with.
+The socket mini-service has no such route, so its claim is still believed on the file's own
+checks — the live confirmation is what the app can do and the socket cannot.
+
+**Reuse is checked, because reuse can silently serve old code.** `dev:up` never kills
+anything, so a stack left running from earlier is reported and used — but a service whose
+restart-required inputs changed after it started is serving code from before that change, and
+calling that "reused" alone would be misleading. What counts is what the process reads *once*:
+for the app that is `.env.local` (a module captured what it read at import), `package.json`,
+the config files, the Prisma schema and generated client, and `src/instrumentation.ts`, which
+Next runs once per server — hot-reloadable `src/**` is deliberately not among them, since an
+edit there does reach the running process and warning about it would be noise. The socket
+mini-service is the simpler case: it runs from source with no watcher at all, so a file under
+its own directory (or the one module it imports from outside it) leaves a running copy behind
+its own code. The warning names the file, how long after the start it changed, and the command
+that fixes it; the summary repeats it as a `stale:` line beside the preview call it is a
+caveat on; `--json` carries `services.<name>.staleness` — where `checked: false` means there
+was no boot marker to compare against, which is not the same answer as current — and
+`--preview` still prints its call, since the pid and the URL are current even when the code
+is not.
+
+The summary's last line is the whole **Preview-tab handoff** —
+`register_preview({ url: "http://localhost:3000/", pid: … })` — rendered from that
+verified pid, so opening the app in a Preview tab never means rediscovering the
+listener.
 
 It is safe to re-run: each service is probed by its TCP port first, so anything
 already up is reported and left alone, and nothing is ever killed. `--no-schema` skips
 `prisma generate`/`db push`; `--pid` prints only the listener pid and starts nothing;
-`--json` ends the run with a machine-readable summary on stdout (progress goes to
-stderr), which is what scripts — and the test below — read; `--help` lists the rest.
-Logs land in `.zscripts/dev-up.log` and `.zscripts/dev-up-socket.log`, and the
-listener pid in `.zscripts/dev-up.pid`. `DEV_UP_LOG_DIR` moves the logs *and* the pid
-file (so a scratch run cannot truncate a live service's log) and `SOCKET_PORT` moves
-the socket service.
+`--preview` prints only that `register_preview` call and starts nothing — exiting
+non-zero with the reason when no pid can be verified for the port, or when the URL does
+not answer, instead of handing over a call that would register a dead preview. `--json`
+ends the run with a machine-readable summary on stdout (progress goes to stderr), which
+is what scripts — and the test below — read, and it carries the same handoff as
+`preview: {url, pid, httpCode, ready, register, note}` so a caller can run
+`.preview.register` verbatim; `--help` lists the rest.
+Logs land in `.zscripts/dev-up.log` and `.zscripts/dev-up-socket.log`, the
+listener pid in `.zscripts/dev-up.pid`, and each service's own boot-time claim in
+`.zscripts/dev-server.json` and `.zscripts/attendance-socket.json` (none of these is
+committed). `DEV_UP_LOG_DIR` moves the logs *and* those files (so a scratch run can
+neither truncate a live service's log nor read its claim as its own) and `SOCKET_PORT`
+moves the socket service.
 
 Its counterpart stops exactly what that command started, and nothing else:
 
@@ -118,7 +172,9 @@ process the OS shows owning the recorded port; a recycled pid, or a port someone
 serves, is refused with a warning instead of killed. PostgreSQL (`pg_ctl -m fast`, when the
 local cluster's tools are present), the socket service and the dev server go down in that
 dependency order, the pid file is removed only when the listener it describes is gone, and
-the run is safe to repeat. `--json` prints the same machine-readable shape as `dev:up`
+each service's own boot-time claim goes with the process it describes — a killed service
+cannot clean up after itself, and a stale claim naming a since-recycled pid is the one way
+that file can be wrong. The run is safe to repeat. `--json` prints the same machine-readable shape as `dev:up`
 (`services.<name>.action` ∈ `stopped|left-alone|already-down|failed`, plus `stopped`,
 `stillListening` — every recorded port still served, including services deliberately left
 alone — and `leaked`, the subset it owns and could not stop), and the exit status is
@@ -127,10 +183,19 @@ non-zero only when something it owns is *still* serving its port.
 That idempotency is not taken on trust: `src/lib/dev-up.test.ts` runs the script twice,
 checks the pid it reports against the operating system's own list of listeners on port
 3000, and kills a service to watch it come back — `npm run test:dev-up` (opt-in, since
-it spawns and kills real processes).
+it spawns and kills real processes). The handoff is held to the same standard: the pid
+in the printed call must be the pid the OS names for the port, said identically by the
+summary, `--preview` and the JSON, and the three ways to have nothing to hand over —
+no listener, a listener that never answers HTTP, and a clean stack — are each exercised
+on a scratch port.
 The same file covers `dev:down`: that it stops what `dev:up` started on a scratch port
 while the live stack is untouched, that it is safe to re-run, that it never kills a pid
 the record does not account for, and that it stops nothing at all when there is no record.
+It also covers staleness, in both directions and for both reasons: on a scratch checkout
+whose services and boot markers the test controls, the app is reported stale for a changed
+`.env.local` and current again once its marker moves, an absent marker is reported as
+"not checked" rather than as current, and the watcher-less socket service is reported stale
+for a change to its own source.
 
 Where a platform cannot name the pid holding a port, the suite skips the assertions that
 need one and says so — in CI as a `::notice::` annotation, so a step that passed by not
@@ -404,8 +469,8 @@ and every pull request:
 
 | Job (required status check) | What it proves |
 |-----------------------------|----------------|
-| **Typecheck & unit suites** | `tsc --noEmit` produces no *new* errors (the 18 pre-existing ones are an explicit baseline) and the 8 suites that mock the data layer pass |
-| **Full suite (seeded PostgreSQL)** | A `postgres:16` container is started, the stack is brought up by **`npm run dev:up` — the same command this README gives a developer** (`DEV_UP_APP_TIMEOUT=300` gives a cold runner the ceiling a bespoke poll used to provide), `POST /api/setup?force=true` seeds it, one login per role is verified, then all 12 `bun test` files run against that database, followed by the opt-in bring-up suite (`dev-up.test.ts`), which re-runs that same script against the same stack |
+| **Typecheck & unit suites** | `tsc --noEmit` produces no *new* errors (the 18 pre-existing ones are an explicit baseline) and the 11 suites that need neither a database nor a server pass |
+| **Full suite (seeded PostgreSQL)** | A `postgres:16` container is started, the stack is brought up by **`npm run dev:up` — the same command this README gives a developer** (`DEV_UP_APP_TIMEOUT=300` gives a cold runner the ceiling a bespoke poll used to provide), `POST /api/setup?force=true` seeds it, one login per role is verified, then every `bun test` file runs against that database — the opt-in bring-up suite opts itself out of that step and has its own below, where it re-runs the same script against the same stack |
 
 A red run only *blocks* a merge once both job names are listed in **Settings →
 Branches → branch protection rule for `main` → Require status checks to pass
@@ -448,7 +513,8 @@ To run the same suite locally, bring the stack up the way CI does — `npm run d
 every file; the unit suites alone need neither a database nor a server:
 
 ```bash
-bun test              # all 12 files, needs the dev server + seeded DB
+bun test              # all 17 files (dev-up.test.ts self-disables without DEV_UP_TEST=1),
+                      # needs the dev server + a seeded DB
 npm run test:dev-up   # + the bring-up script's own idempotency checks
 ```
 

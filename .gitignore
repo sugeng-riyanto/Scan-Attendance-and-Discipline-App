@@ -61,3 +61,8 @@ server.log
 # dev-down.sh reads them back (see .zscripts/lib-stack.sh)
 .zscripts/dev-up.pid
 .zscripts/dev-up.state.json
+# what each service writes about itself at boot (pid, port, checkout), which dev-up
+# reads instead of asking the OS which pid owns its port: the dev server, and the
+# socket mini-service
+.zscripts/dev-server.json
+.zscripts/attendance-socket.json

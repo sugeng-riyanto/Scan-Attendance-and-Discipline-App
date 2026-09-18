@@ -85,12 +85,15 @@ jobs:
             echo "::notice::Backlog shrank to $COUNT — lower BASELINE in .github/workflows/ci.yml"
           fi
 
-      # The suites that mock the data layer, so they need neither a database nor
-      # a server. The three HTTP suites (api-smoke, rbac-routes,
-      # terms-lifecycle) run in the job below.
+      # The suites that need neither a database nor a server: they mock the data
+      # layer, or (the three identity suites) touch no data at all. The three HTTP
+      # suites (api-smoke, rbac-routes, terms-lifecycle) run in the job below.
       - name: Unit suites (mocked data layer)
         run: |
           bun test \
+            src/lib/dev-server-identity.test.ts \
+            src/lib/dev-identity-route.test.ts \
+            src/lib/service-identity.test.ts \
             src/lib/partial-update.test.ts \
             src/lib/rbac-policy.test.ts \
             src/lib/scan-gating.test.ts \
@@ -253,10 +256,13 @@ jobs:
       # the one the OS says owns the port, and that a killed service comes back.
       # Opt-in via DEV_UP_TEST because it spawns — and in some cases kills — real
       # processes; every kill case uses a scratch socket port and a throwaway log
-      # dir, so the live socket service is never touched. The last five cases are
+      # dir, so the live socket service is never touched. Five of the cases are
       # dev-down.sh's: that it stops exactly what dev:up started, is safe to
       # re-run, leaves alone what the record does not claim, refuses a recorded pid
-      # that no longer owns its port, and does nothing when there is no record.
+      # that no longer owns its port, and does nothing when there is no record. The
+      # last one covers a service older than its own source — on a scratch checkout
+      # whose services and boot markers the suite controls, so the staleness report
+      # is asserted in both directions without touching the live stack's source.
       - name: Bring-up script is idempotent
         env:
           DEV_UP_TEST: '1'
