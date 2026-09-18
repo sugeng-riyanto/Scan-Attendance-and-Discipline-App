@@ -830,12 +830,19 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
 
       // 2. A port that accepts TCP and never answers HTTP: a pid, but registering it
       //    would put an error page in front of someone, so it is refused too.
+      //
+      //    Given a short budget on purpose. The refusal is what this part tests, and the
+      //    patience the script gives a slow page is not — paying the default to prove the
+      //    negative would spend a minute of every run (measured: 65 s on CI, where the
+      //    ceiling is reached in full) asserting something 5 s answers just as well. That
+      //    also makes the message the assertion: it has to name the budget it was given,
+      //    which is the only place DEV_UP_PREVIEW_TIMEOUT is observable at all.
       startHelper(listenOn(port))
       await waitFor(() => listenerPids(port).length > 0, 15_000)
-      const silent = run(BASH, [script, '--preview'], env, dir)
+      const silent = run(BASH, [script, '--preview'], { ...env, DEV_UP_PREVIEW_TIMEOUT: '5' }, dir)
       expect(silent.status).not.toBe(0)
       expect((silent.stdout ?? '').trim()).toBe('')
-      expect(silent.stderr).toContain('never answered')
+      expect(silent.stderr).toContain('never answered in 5s')
 
       // 3. Now it really serves. The printed call must name this port and the pid the
       //    OS itself lists for it — not the helper's parent, not a bare "null".
