@@ -489,6 +489,20 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
     if (scratchPid && isAlive(scratchPid)) killTree(scratchPid)
     if (scratchDir) rmSync(scratchDir, { recursive: true, force: true })
     for (const helper of helperProcs) if (helper.pid) killTree(helper.pid)
+    // Any supervisor a fixture started — a scratch log directory, whichever case it belonged
+    // to — is stopped here rather than left watching a port nobody owns. The first version of
+    // these cases did leave several behind (ten processes on the machine this was written on),
+    // each of them quietly restarting a scratch service for as long as the machine lived.
+    for (const dir of helperDirs) {
+      try {
+        const pid = (JSON.parse(readFileSync(path.join(dir, 'dev-supervisor.state.json'), 'utf8')) as {
+          pid?: number
+        }).pid
+        if (pid && Number.isInteger(pid) && isAlive(pid)) killTree(pid)
+      } catch {
+        /* no record there, or nothing readable — nothing to stop */
+      }
+    }
     for (const dir of helperDirs) rmSync(dir, { recursive: true, force: true })
     // Safety net: this suite must never leave the developer with a dead socket
     // service, so if 3003 is empty at the end, put the stack back up.
@@ -749,7 +763,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
 
         // …and the report says the same thing in machine-readable form, so a caller reading
         // `--json` learns the file was stale rather than having to parse a warning.
-        const staleRun = devUp(['--no-schema'], env)
+        const staleRun = devUp(['--no-schema', '--no-supervise'], env)
         expect(staleRun.report.listenerPid).toBe(answeredPid.pid)
         expect(staleRun.report.listenerClaim).toEqual({ pid: process.pid, agrees: false })
         expect(staleRun.report.listenerPidSource).toBe('self')
@@ -761,7 +775,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
         //    test wrote, which is what makes it a statement about the comparison rather than
         //    about the app's own bookkeeping.
         claim({ pid: Number(answer) })
-        const agreedRun = devUp(['--no-schema'], env)
+        const agreedRun = devUp(['--no-schema', '--no-supervise'], env)
         expect(agreedRun.report.listenerPid).toBe(answeredPid.pid)
         expect(agreedRun.report.listenerClaim).toEqual({ pid: Number(answer), agrees: true })
         expect(agreedRun.stderr).not.toContain('stale')
@@ -938,7 +952,10 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
 
       // A first run on the scratch port: the script starts a socket service of
       // its own, which is ours to kill.
-      const started = devUp(['--no-schema'], env)
+      // No supervisor here either: this case kills the scratch socket and then asks dev-up to
+      // put it back, and a watcher would sometimes get there first — which would make the
+      // assertion below about a race rather than about the script.
+      const started = devUp(['--no-schema', '--no-supervise'], env)
       scratchStackStarted = true
       expect(started.report.socketPort).toBe(scratchPort)
       expect(started.report.services.socket.port).toBe(scratchPort)
@@ -1001,7 +1018,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       expect(await waitFor(() => listenerPids(scratchPort).length === 0, 15_000)).toBe(true)
 
       // The next run must put it back — serving again, and under a new pid.
-      const restarted = devUp(['--no-schema'], env)
+      const restarted = devUp(['--no-schema', '--no-supervise'], env)
       expect(restarted.report.services.socket.state).toBe('started')
       const secondPid = restarted.report.services.socket.pid
       if (secondPid === null) {
@@ -1303,8 +1320,13 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
 
       const env = { DEV_UP_LOG_DIR: logDir, SOCKET_PORT: String(socketPort) }
       const script = path.join('.zscripts', 'dev-up.sh')
+      // `--no-supervise` by default, and not as a convenience: a fixture that left a watcher
+      // behind would outlive the case (nothing here tears a scratch stack down) and, worse,
+      // change the state under test — a supervisor puts back the very service a case is about
+      // to kill, on a timer nobody in the test controls. The one case that *is* about
+      // supervision asks for it explicitly.
       const devUpIn = (args: string[] = []) => {
-        const res = run(BASH, [script, '--json', ...args], env, dir)
+        const res = run(BASH, [script, '--json', '--no-supervise', ...args], env, dir)
         const stdout = res.stdout ?? ''
         const start = stdout.indexOf('{')
         if (start === -1) {

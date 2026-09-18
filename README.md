@@ -235,6 +235,12 @@ repair is in the record and the log with both pids (dead and replacement), that 
 `dev:up` reports the restart, and that `dev:down` stops the supervisor before the services:
 the port then stays quiet for three watch intervals, which is the assertion a supervisor left
 running past its teardown would fail.
+The other cases pass `--no-supervise`, and that is not tidiness: a supervisor left by a fixture
+outlives the case *and* changes what it is testing — it puts back the very service the case is
+about to kill, on a timer no test controls. An earlier version of these cases leaked one per
+fixture, each of them restarting a scratch service for as long as the machine lived; the case
+that is about supervision asks for it explicitly, and the suite's teardown stops any supervisor
+a scratch log directory still records.
 
 Where a platform cannot name the pid holding a port, the suite skips the assertions that
 need one and says so — in CI as a `::notice::` annotation, so a step that passed by not
