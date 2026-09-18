@@ -11,7 +11,7 @@
  * case passes its own `env`/`cwd` into a temp directory.
  */
 import { afterAll, describe, expect, it } from 'bun:test'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -40,7 +40,19 @@ describe('dev server identity', () => {
     })
 
     it('publishes to the checkout by default in development', () => {
-      const cwd = path.join('C:', 'checkout')
+      // A scratch directory that *is* a checkout — the `.zscripts/` marker is what makes it
+      // one, since `checkoutRoot` walks up looking for exactly that. Built from `os.tmpdir()`
+      // rather than spelled out: `C:/checkout` is absolute on Windows and *relative* on
+      // Linux, where it resolved inside this repository, whose own `.zscripts/` the walk-up
+      // then found. The assertion held locally and failed in CI, on a fixture the platform
+      // decided the meaning of.
+      const cwd = scratch()
+      mkdirSync(path.join(cwd, '.zscripts'), { recursive: true })
+      expect(pidFilePath({ NODE_ENV: 'development' }, cwd)).toBe(path.join(cwd, DEFAULT_PID_FILE))
+    })
+
+    it('falls back to publishing beside itself when nothing above it is a checkout', () => {
+      const cwd = scratch()
       expect(pidFilePath({ NODE_ENV: 'development' }, cwd)).toBe(path.join(cwd, DEFAULT_PID_FILE))
     })
 
