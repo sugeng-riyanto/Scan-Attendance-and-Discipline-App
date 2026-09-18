@@ -5,7 +5,9 @@ import { AuthUser, useAuthStore } from '@/lib/stores/auth-store'
 import { roleLabels } from '@/lib/attendance-utils'
 import { canAccessApi } from '@/lib/rbac-policy'
 import { apiFetch } from '@/lib/api-fetch'
+import { useSocketEvent } from '@/lib/socket-client'
 import { computeDiff, diffStats, type DiffLine } from '@/lib/terms-diff'
+import { provenanceShortLabel, provenanceSentence, provenanceRecordedBy } from '@/lib/terms-provenance'
 import { toast } from 'sonner'
 import {
   ScrollText, ShieldCheck, FileText, FileSpreadsheet,
@@ -32,6 +34,9 @@ interface TermsRecord {
 interface AcceptanceUser {
   id: string; name: string; username: string; role: string
   acceptedVersion: number | null; acceptedAt: string | null; isUpToDate: boolean
+  // Per-user provenance: null `acceptedBy` means the acceptance predates it, which
+  // is reported as "Not recorded" rather than assumed to be the user's own act.
+  acceptedBy: string | null; acceptedByUserId: string | null; acceptedOnBehalf: boolean
 }
 
 /** Default T&C content used when the DB has no record yet */
@@ -183,10 +188,24 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
   // Acceptance tracking
   const [acceptance, setAcceptance] = useState<{
     currentVersion: number; total: number; accepted: number; pending: number; users: AcceptanceUser[]
+    acceptedSelf?: number; acceptedOnBehalf?: number; acceptedUnknown?: number
   } | null>(null)
   const [acceptanceLoading, setAcceptanceLoading] = useState(false)
   const [showAcceptance, setShowAcceptance] = useState(false)
   const [filterAccepted, setFilterAccepted] = useState<'all' | 'accepted' | 'pending'>('all')
+
+  // Another admin recorded acceptance for the school: refresh what is on screen.
+  // This deliberately does not reuse `loadAcceptance`, which *toggles* the panel —
+  // an event from someone else must never close the list a person is reading.
+  useSocketEvent('terms:bulk-accepted', async () => {
+    if (!canEdit) return
+    try {
+      setAcceptance(await apiFetch<any>('/api/terms-content?acceptance=true'))
+      setShowAcceptance(true)
+    } catch {
+      // Not allowed to see the list, or the page moved on before it arrived.
+    }
+  })
 
   const loadAcceptance = async () => {
     if (showAcceptance) { setShowAcceptance(false); return }
@@ -389,6 +408,11 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
           userVersion={(user as any).termsAcceptedVersion ?? null}
           themeColor={user?.school?.themeColor || '#10b981'}
           publishedAt={terms.createdAt}
+          // Provenance of this person's own acceptance, so the record is shown to
+          // the person it is about — including when someone else recorded it.
+          acceptedAt={user.termsAcceptedAt ?? null}
+          acceptedBy={user.termsAcceptedBy ?? null}
+          acceptedOnBehalf={user.termsAcceptedOnBehalf ?? false}
         />
       )}
 
@@ -499,6 +523,22 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
               </div>
             </div>
 
+            {/* Who recorded those acceptances. A consent report has to answer this at
+                school level too — "14 recorded by an administrator for them" is not
+                the same statement as "14 accepted". */}
+            {acceptance.accepted > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Of {acceptance.accepted} accepted:{' '}
+                <span className="font-medium text-gray-700 dark:text-gray-300">{acceptance.acceptedSelf ?? 0} by the account holder</span>
+                {(acceptance.acceptedOnBehalf ?? 0) > 0 && (
+                  <>, <span className="font-medium text-amber-700 dark:text-amber-400">{acceptance.acceptedOnBehalf} recorded by an administrator for them</span></>
+                )}
+                {(acceptance.acceptedUnknown ?? 0) > 0 && (
+                  <>, <span className="font-medium">{acceptance.acceptedUnknown} with no provenance recorded</span></>
+                )}
+              </p>
+            )}
+
             {/* Filter tabs */}
             <div className="flex gap-1">
               {(['all', 'accepted', 'pending'] as const).map(f => (
@@ -525,13 +565,14 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                     <th className="px-3 py-2 font-medium">Role</th>
                     <th className="px-3 py-2 font-medium">Accepted</th>
                     <th className="px-3 py-2 font-medium">Date</th>
+                    <th className="px-3 py-2 font-medium">Recorded by</th>
                     <th className="px-3 py-2 font-medium text-right">Status</th>
                     <th className="px-3 py-2 font-medium text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.length === 0 && (
-                    <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No users found.</td></tr>
+                    <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No users found.</td></tr>
                   )}
                   {filteredUsers.map(u => (
                     <UserAcceptanceRow key={u.id} user={u} themeColor={user?.school?.themeColor || '#10b981'} />
@@ -570,6 +611,33 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                 }}
               >
                 <Bell className="h-3 w-3 mr-1" /> Remind {acceptance.pending} User(s) to Accept v{acceptance.currentVersion}
+              </Button>
+
+              {/* Recording consent for someone else is an administrative act, not a
+                  shortcut: the confirm text says so, and the API logs it in the
+                  caller's name as one bulk entry rather than per-user clicks. */}
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full border-green-300 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-300 dark:hover:bg-green-950/30"
+                onClick={async () => {
+                  if (!confirm(`Record T&C v${acceptance.currentVersion} as accepted for all ${acceptance.pending} pending user(s)?\n\nThis is logged as a bulk action in your name, and it covers every user you can see in this school.\n\nEach record will name you as the person who recorded it on their behalf.`)) return
+                  try {
+                    const data = await apiFetch<{ updated: number; scope: string; message: string; acceptedBy: { name: string }; onBehalfCount: number; selfCount: number }>('/api/terms-accept-bulk', {
+                      method: 'POST',
+                    })
+                    const split = [
+                      data.onBehalfCount ? `${data.onBehalfCount} on their behalf` : '',
+                      data.selfCount ? `${data.selfCount} your own account` : '',
+                    ].filter(Boolean).join(', ')
+                    toast.success(`${data.message} — recorded by ${data.acceptedBy.name}${split ? ` (${split})` : ''}`)
+                    loadAcceptance() // Refresh the list
+                  } catch (err: any) {
+                    toast.error(err.message || 'Failed to record acceptance')
+                  }
+                }}
+              >
+                <CheckCircle className="h-3 w-3 mr-1" /> Accept v{acceptance.currentVersion} for {acceptance.pending} User(s)
               </Button>
 
               <div className="flex gap-2">
@@ -638,18 +706,31 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                 </Button>
               </div>
 
-              {/* Export CSV/XLSX buttons */}
-              <div className="flex gap-2 mt-2">
+              </>
+            )}
+
+            {/* Export CSV/XLSX — deliberately outside the `pending > 0` guard that
+                wraps the actions above: the moment the record is complete is exactly
+                when someone needs to keep it, and hiding the export then is what made
+                a finished acceptance report impossible to download. */}
+            <div className="flex gap-2 mt-2">
                 <Button
                   size="sm" variant="outline"
                   className="flex-1 border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
                   onClick={() => {
                     if (!acceptance?.users?.length) return
-                    const header = ['Name','Username','Role','Accepted Version','Accepted Date','Status']
+                    // The provenance columns make the export a consent record per
+                    // person, not just a list of who is up to date: "Admin (on behalf)"
+                    // with the recording username is the evidence that an
+                    // administrator accepted on someone's behalf.
+                    const header = ['Name','Username','Role','Accepted Version','Accepted Date','Accepted By','Recorded By','Recorded At','Status']
                     const rows = acceptance.users.map(u => [
                       u.name, u.username, roleLabels[u.role] || u.role,
                       u.acceptedVersion !== null ? `v${u.acceptedVersion}` : '',
                       u.acceptedAt ? new Date(u.acceptedAt).toLocaleDateString() : '',
+                      u.acceptedVersion === null ? '' : provenanceShortLabel({ acceptedBy: u.acceptedBy, onBehalf: u.acceptedOnBehalf }),
+                      u.acceptedVersion === null ? '' : provenanceRecordedBy({ acceptedBy: u.acceptedBy }),
+                      u.acceptedAt ? new Date(u.acceptedAt).toLocaleString() : '',
                       u.isUpToDate ? 'Up to date' : 'Needs re-acceptance',
                     ])
                     const csv = '\uFEFF' + [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
@@ -678,6 +759,9 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                         Role: roleLabels[u.role] || u.role,
                         'Accepted Version': u.acceptedVersion !== null ? `v${u.acceptedVersion}` : '',
                         'Accepted Date': u.acceptedAt ? new Date(u.acceptedAt).toLocaleDateString() : '',
+                        'Accepted By': u.acceptedVersion === null ? '' : provenanceShortLabel({ acceptedBy: u.acceptedBy, onBehalf: u.acceptedOnBehalf }),
+                        'Recorded By': u.acceptedVersion === null ? '' : provenanceRecordedBy({ acceptedBy: u.acceptedBy }),
+                        'Recorded At': u.acceptedAt ? new Date(u.acceptedAt).toLocaleString() : '',
                         Status: u.isUpToDate ? 'Up to date' : 'Needs re-acceptance',
                       }))
                       const ws = XLSX.utils.json_to_sheet(data)
@@ -693,8 +777,6 @@ export function TermsPage({ user, publicView }: { user: AuthUser; publicView?: b
                   <FileSpreadsheet className="h-3 w-3 mr-1" /> Export XLSX
                 </Button>
               </div>
-              </>
-            )}
           </CardContent>
         </Card>
       )}
@@ -722,13 +804,17 @@ function DiffLineView({ line }: { line: DiffLine }) {
  * with acceptedTerms=true which records the acceptance server-side.
  */
 function TermsAcceptButton({
-  currentVersion, userVersion, themeColor, publishedAt
+  currentVersion, userVersion, themeColor, publishedAt, acceptedAt, acceptedBy, acceptedOnBehalf
 }: {
   currentVersion: number; userVersion: number | null; themeColor: string; publishedAt?: string
+  acceptedAt?: string | null; acceptedBy?: string | null; acceptedOnBehalf?: boolean
 }) {
   const isUpToDate = userVersion !== null && userVersion >= currentVersion
   const [busy, setBusy] = React.useState(false)
   const [done, setDone] = React.useState(isUpToDate)
+  // Set when this very click is what recorded it, so the note below does not have
+  // to wait for a reload to stop saying "not recorded".
+  const [justAccepted, setJustAccepted] = React.useState(false)
 
   // Calculate days remaining until 30-day deadline
   const daysRemaining = React.useMemo(() => {
@@ -739,10 +825,24 @@ function TermsAcceptButton({
     return Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
   }, [publishedAt])
 
+  // Who recorded this person's acceptance, in their own view. A record that says
+  // an administrator accepted on your behalf is the whole point of tracking this
+  // per user, so it is shown rather than hidden behind the admin panel.
+  const provenanceNote = justAccepted
+    ? 'Anda menekan tombol persetujuan sendiri, sehingga tercatat atas nama Anda.'
+    : !acceptedBy
+      ? 'Cara persetujuan ini dicatat tidak tersedia (dibuat sebelum pencatatan asal-usul diaktifkan).'
+      : acceptedOnBehalf
+        ? `Persetujuan ini dicatat oleh administrator @${acceptedBy} untuk akun Anda${acceptedAt ? ` pada ${new Date(acceptedAt).toLocaleString('id-ID')}` : ''} — bukan dari Anda menekan tombol persetujuan.`
+        : `Persetujuan dicatat oleh Anda sendiri (@${acceptedBy})${acceptedAt ? ` pada ${new Date(acceptedAt).toLocaleString('id-ID')}` : ''}.`
+
   if (done) {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center text-sm text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
         <CheckCircle className="h-4 w-4 inline mr-1" /> Anda telah menyetujui Syarat & Ketentuan v{currentVersion}.
+        <span className={`block mt-1 text-xs ${acceptedOnBehalf && !justAccepted ? 'font-medium text-amber-700 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+          {provenanceNote}
+        </span>
       </div>
     )
   }
@@ -777,6 +877,7 @@ function TermsAcceptButton({
           })
           useAuthStore.getState().updateUser({ termsAcceptedVersion: currentVersion } as any)
           setDone(true)
+          setJustAccepted(true)
           toast.success(`Syarat & Ketentuan v${currentVersion} telah disetujui.`)
         } catch {
           toast.error('Gagal mencatat persetujuan. Silakan coba lagi.')
@@ -821,6 +922,26 @@ function UserAcceptanceRow({ user, themeColor }: { user: AcceptanceUser; themeCo
       <td className="px-3 py-2"><Badge variant="outline" className="text-xs">{roleLabels[user.role] || user.role}</Badge></td>
       <td className="px-3 py-2">{user.acceptedVersion !== null ? `v${user.acceptedVersion}` : '—'}</td>
       <td className="px-3 py-2 text-muted-foreground">{user.acceptedAt ? new Date(user.acceptedAt).toLocaleDateString() : '—'}</td>
+      {/* Provenance, not just a timestamp: `acceptedBy` null is "not recorded",
+          which is a different answer from "the user accepted it themselves". */}
+      <td className="px-3 py-2" title={provenanceSentence(
+        { acceptedBy: user.acceptedBy, onBehalf: user.acceptedOnBehalf },
+        user.acceptedAt,
+      )}>
+        {user.acceptedVersion === null ? (
+          <span className="text-muted-foreground">—</span>
+        ) : user.acceptedOnBehalf ? (
+          <span className="text-amber-700 dark:text-amber-400">
+            {provenanceShortLabel({ acceptedBy: user.acceptedBy, onBehalf: true })}
+            <span className="block text-muted-foreground">@{user.acceptedBy}</span>
+          </span>
+        ) : (
+          <span className={user.acceptedBy ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'}>
+            {provenanceShortLabel({ acceptedBy: user.acceptedBy, onBehalf: false })}
+            {user.acceptedBy && <span className="block text-muted-foreground">@{user.acceptedBy}</span>}
+          </span>
+        )}
+      </td>
       <td className="px-3 py-2 text-right">
         {user.isUpToDate ? (
           <span className="text-green-600 dark:text-green-400 flex items-center gap-1 justify-end"><CheckCircle className="h-3 w-3" /> Up to date</span>

@@ -4,6 +4,7 @@ import { verifyPassword, signToken, getAuthUser } from '@/lib/auth-utils';
 import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
 import { logAudit } from '@/lib/audit';
+import { selfAcceptance } from '@/lib/terms-provenance';
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,6 +48,11 @@ export async function POST(request: NextRequest) {
     // re-accept the latest version before logging in.
     let termsAcceptedAt = user.termsAcceptedAt;
     let termsAcceptedVersion = user.termsAcceptedVersion;
+    // Provenance travels with the acceptance so the client can tell the account
+    // holder who recorded it — including when it was an administrator.
+    let termsAcceptedBy = user.termsAcceptedBy;
+    let termsAcceptedByUserId = user.termsAcceptedByUserId;
+    let termsAcceptedOnBehalf = user.termsAcceptedOnBehalf;
 
     // Fetch the current active T&C version + publication date for deadline calc
     const activeTerms = await db.termsContent.findFirst({
@@ -99,9 +105,15 @@ export async function POST(request: NextRequest) {
       if (acceptedTerms === true) {
         termsAcceptedAt = new Date();
         termsAcceptedVersion = currentVersion;
+        // The checkbox on the login screen is the account holder's own act, so the
+        // record names them: `termsAcceptedOnBehalf` stays false.
+        const provenance = selfAcceptance({ id: user.id, username: user.username });
+        termsAcceptedBy = provenance.termsAcceptedBy;
+        termsAcceptedByUserId = provenance.termsAcceptedByUserId;
+        termsAcceptedOnBehalf = provenance.termsAcceptedOnBehalf;
         await db.user.update({
           where: { id: user.id },
-          data: { termsAcceptedAt, termsAcceptedVersion },
+          data: { termsAcceptedAt, termsAcceptedVersion, ...provenance },
         });
       } else {
         return NextResponse.json(
@@ -136,6 +148,10 @@ export async function POST(request: NextRequest) {
         avatar: user.avatar,
         termsAccepted: !!termsAcceptedAt,
         termsAcceptedVersion,
+        termsAcceptedAt,
+        termsAcceptedBy,
+        termsAcceptedByUserId,
+        termsAcceptedOnBehalf,
         school: school
           ? { id: school.id, code: school.code, name: school.name, address: school.address, logo: school.logo, themeColor: school.themeColor }
           : null,

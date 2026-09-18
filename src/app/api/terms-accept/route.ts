@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth-utils'
 import { logAudit } from '@/lib/audit'
+import { selfAcceptance } from '@/lib/terms-provenance'
 
 /**
  * POST /api/terms-accept
@@ -30,13 +31,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No active Terms & Conditions found' }, { status: 404 })
     }
 
-    // Update the user's acceptance record
+    // Update the user's acceptance record. This endpoint only ever writes the
+    // caller's own row, so the provenance is unambiguous: they accepted it
+    // themselves, and the record names them rather than leaving a bare timestamp.
     const now = new Date()
+    const provenance = selfAcceptance({ id: auth.userId, username: auth.username })
     await db.user.update({
       where: { id: auth.userId },
       data: {
         termsAcceptedAt: now,
         termsAcceptedVersion: activeTerms.version,
+        ...provenance,
       },
     })
 
@@ -50,13 +55,18 @@ export async function POST(request: NextRequest) {
       username: auth.username,
       role: auth.role,
       ip,
-      details: `Terms & Conditions v${activeTerms.version} accepted via Terms page`,
+      details:
+        `Terms & Conditions v${activeTerms.version} accepted via Terms page ` +
+        `by the account holder (${auth.username})`,
     })
 
     return NextResponse.json({
       success: true,
       termsAcceptedVersion: activeTerms.version,
       termsAcceptedAt: now.toISOString(),
+      termsAcceptedBy: provenance.termsAcceptedBy,
+      termsAcceptedByUserId: provenance.termsAcceptedByUserId,
+      termsAcceptedOnBehalf: provenance.termsAcceptedOnBehalf,
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })

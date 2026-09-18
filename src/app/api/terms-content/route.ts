@@ -3,7 +3,8 @@ import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth-utils';
 import { canAccessApi } from '@/lib/rbac-policy';
 import { getSchoolScope } from '@/lib/school-scope';
-import { logAudit } from '@/lib/audit';
+import { logAudit } from '@/lib/audit'
+import { provenanceKind } from '@/lib/terms-provenance';
 
 // Reading the history and the acceptance report carries the same right as
 // publishing a version, so the policy's terms-content write key answers all of
@@ -61,12 +62,19 @@ export async function GET(request: NextRequest) {
         select: {
           id: true, name: true, username: true, role: true, schoolId: true,
           termsAcceptedAt: true, termsAcceptedVersion: true,
+          // Per-user provenance: who recorded this acceptance, and whether it was
+          // the account holder or an administrator acting for them.
+          termsAcceptedBy: true, termsAcceptedByUserId: true, termsAcceptedOnBehalf: true,
         },
         orderBy: { name: 'asc' },
-      });
-
-      const accepted = users.filter(u => u.termsAcceptedVersion !== null && u.termsAcceptedVersion >= currentVersion);
+      });      const accepted = users.filter(u => u.termsAcceptedVersion !== null && u.termsAcceptedVersion >= currentVersion);
       const pending = users.filter(u => u.termsAcceptedVersion === null || u.termsAcceptedVersion < currentVersion);
+
+      // Of the acceptances that count, how many the account holder made and how
+      // many an administrator recorded for them — the school-level answer to the
+      // question the per-row provenance answers per person.
+      const provenanceOf = (u: (typeof accepted)[number]) =>
+        provenanceKind({ acceptedBy: u.termsAcceptedBy, onBehalf: u.termsAcceptedOnBehalf });
 
       return NextResponse.json({
         currentVersion,
@@ -74,10 +82,18 @@ export async function GET(request: NextRequest) {
         total: users.length,
         accepted: accepted.length,
         pending: pending.length,
+        acceptedSelf: accepted.filter(u => provenanceOf(u) === 'self').length,
+        acceptedOnBehalf: accepted.filter(u => provenanceOf(u) === 'admin').length,
+        acceptedUnknown: accepted.filter(u => provenanceOf(u) === 'unknown').length,
         users: users.map(u => ({
           id: u.id, name: u.name, username: u.username, role: u.role,
           acceptedVersion: u.termsAcceptedVersion,
           acceptedAt: u.termsAcceptedAt,
+          // `acceptedBy` null means "not recorded" (the acceptance predates
+          // provenance), which is why `onBehalf` is only meaningful beside it.
+          acceptedBy: u.termsAcceptedBy,
+          acceptedByUserId: u.termsAcceptedByUserId,
+          acceptedOnBehalf: u.termsAcceptedOnBehalf,
           isUpToDate: u.termsAcceptedVersion !== null && u.termsAcceptedVersion >= currentVersion,
         })),
       });
@@ -114,9 +130,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Terms content must be at least 10 characters' }, { status: 400 });
     }
 
-    // Determine next version number
-    const lastVersion = await db.termsContent.findFirst({ orderBy: { version: 'desc' } });
-    const nextVersion = (lastVersion?.version ?? 0) + 1;
+    // Determine next version number. It has to clear the table *and* the account
+    // records, because an acceptance keeps the number it was made under and
+    // `user.termsAcceptedVersion < currentVersion` is the only thing that decides
+    // whether anyone is asked to read the new text. Numbering from the table alone
+    // reuses a number whenever a version is deleted (which the DELETE handler below
+    // does on purpose: it activates the next-newest and removes the active one), and
+    // a reused number silently marks a *different* text as already agreed to.
+    const [lastVersion, highestAccepted] = await Promise.all([
+      db.termsContent.findFirst({ orderBy: { version: 'desc' }, select: { version: true } }),
+      db.user.aggregate({ _max: { termsAcceptedVersion: true } }),
+    ]);
+    const nextVersion =
+      Math.max(lastVersion?.version ?? 0, highestAccepted._max.termsAcceptedVersion ?? 0) + 1;
 
     // If this should be the active version, deactivate all others first
     if (activate !== false) {

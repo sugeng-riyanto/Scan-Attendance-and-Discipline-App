@@ -104,6 +104,14 @@ model User {
   isActive        Boolean  @default(true)
   termsAcceptedAt DateTime?
   termsAcceptedVersion Int?    // T&C version the user last accepted (re-accept on new version)
+  // Who recorded that acceptance, and whether it was the account holder or an
+  // administrator acting for them. Mirrors AuditLog's userId+username pair: the id
+  // survives a rename, the username is what the record read as at the time.
+  // `termsAcceptedBy` is null for acceptances written before provenance existed,
+  // which means "not recorded" — not "accepted by the user".
+  termsAcceptedBy       String?   // username of whoever recorded it
+  termsAcceptedByUserId String?   // their account id at the time
+  termsAcceptedOnBehalf Boolean  @default(false) // an administrator recorded it for this user
   termsDeadlineExtension Int @default(0) // Extra days added to the 30-day T&C deadline for this user
   email           String?
   // Account security & reminders (per-role Pengaturan Akun)

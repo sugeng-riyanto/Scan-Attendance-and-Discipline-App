@@ -422,6 +422,15 @@ The database is a throwaway container, so a failure means the code is wrong
 rather than the fixture: the write probes create and delete their own rows, and
 `rbac-routes.test.ts` re-checks the seeded baseline in `afterAll`.
 
+The one suite that *publishes* product state is `terms-lifecycle.test.ts`, since
+activating a T&C version is the only way to test the login blocking it causes. It
+snapshots the terms table and the accounts it drives and restores both — in its last
+case and again in `afterAll` if a run ended early — so a local run no longer leaves a
+new version active, which used to reset every user to "pending" on the dashboard, and
+which is why the local database had accumulated 53 suite-minted versions by 2026-09-18.
+Seeding fresh in CI hides that, so the restore is asserted rather than assumed: the
+suite's last case fails if the table or either account differs from the snapshot.
+
 Optional repository secrets, both with CI-only fallbacks so neither is required:
 `CI_JWT_SECRET`, `CI_SOCKET_RELAY_TOKEN`.
 
@@ -535,6 +544,12 @@ The application complies with:
 Features:
 - Mandatory T&C acceptance checkbox on first login (tracked per user)
 - T&C page accessible from Settings → Terms & Conditions
+- **A published version is numbered above every version any account has already
+  accepted**, not merely above the highest row in the table (`POST /api/terms-content`).
+  Acceptance keeps the number it was made under, and that comparison is the only thing
+  that decides who must read the new text — so numbering from the table alone would let
+  a deleted version's number be reused for different text, which every account that
+  accepted the old one would then be treated as having agreed to
 - Data breach incident reporting via Activity Log → BREACH_REPORTED
 - Per-school data isolation prevents cross-school data access
 - Role-based access control with audit logging

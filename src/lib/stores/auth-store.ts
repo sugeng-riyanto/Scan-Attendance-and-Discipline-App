@@ -18,6 +18,11 @@ export interface AuthUser {
   avatar?: string;
   termsAccepted?: boolean;
   termsAcceptedVersion?: number | null;
+  /** Per-user provenance of that acceptance — see src/lib/terms-provenance.ts. */
+  termsAcceptedAt?: string | null;
+  termsAcceptedBy?: string | null;
+  termsAcceptedByUserId?: string | null;
+  termsAcceptedOnBehalf?: boolean;
   school?: SchoolBranding | null;
 }
 

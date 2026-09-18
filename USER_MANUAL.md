@@ -92,6 +92,18 @@ The school administrator manages all data within their school.
 - Assign roles (Admin, Principal, VP, Homeroom Teacher, Teacher, Security)
 - **Change Password** and **Change Email** for PIN quick-login setup
 
+### Terms & Conditions acceptance
+- **Acceptance panel** (Terms & Conditions page): shows which users have accepted the current version, and who still has not. Its **Recorded by** column says, for each person, whether they accepted it themselves (*Self*, with their username) or an administrator recorded it for them (*Admin (on behalf)*, with the administrator's username); a row whose acceptance predates this tracking reads *Not recorded* rather than being assumed to be the user's own act. A summary line above the table gives the same split for the school — *"Of 41 accepted: 3 by the account holder, 38 recorded by an administrator for them"*
+  - Each user also sees this for themselves on the Terms & Conditions page: *"Persetujuan ini dicatat oleh administrator @admin untuk akun Anda pada … — bukan dari Anda menekan tombol persetujuan"*
+- **Remind pending users:** sends a live toast to users who are online and an email to those who are not
+- **Accept for N users:** records acceptance of the current version for every user in your school at once — for clearing a version bump without waiting on each person to log in
+  - It is logged in the activity log as a **bulk** action in your name, with the version and the number of users, because it records consent the users did not click themselves. It covers exactly the users you can see, never another school's
+  - Every account it records for carries **who recorded it and when** on that account, so the consent record answers the question per person, not only per bulk operation. If you are yourself pending, your own account is recorded as a *self*-acceptance — accepting for other people is what "on behalf" means
+  - A bulk run never relabels an acceptance someone made themselves: accounts already up to date are left exactly as they were
+  - Calling it again when nobody is pending changes nothing and records nothing
+- **Deadline extensions:** add 7 or 30 days to the 30-day re-acceptance deadline for pending users, or reset the extensions
+- **Export:** download the acceptance list as CSV or XLSX. The export carries the same provenance per person — *Accepted By*, *Recorded By* and *Recorded At* columns beside the version and date — so the downloaded file is a consent record rather than only a progress list. It stays available after everyone has accepted, which is when it is usually needed
+
 ### School Settings
 - **School Config:** School name, address, theme color, attendance hours
 - **School Profile:** Edit landing page content (description, vision, mission, contact)

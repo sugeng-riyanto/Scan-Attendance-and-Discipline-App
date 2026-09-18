@@ -306,6 +306,9 @@ export const API_ROLES = {
   'POST /api/terms-deadline': SITE_LEADS,
   'PATCH /api/terms-deadline/batch': SITE_LEADS,
   'POST /api/terms-remind': SITE_LEADS,
+  // Accepting on behalf of others writes consent records for every user the
+  // caller can see, so it sits with the other T&C management endpoints.
+  'POST /api/terms-accept-bulk': SITE_LEADS,
 
   // Discipline incidents.
   'GET /api/violations': ALL_SCHOOL_ROLES,

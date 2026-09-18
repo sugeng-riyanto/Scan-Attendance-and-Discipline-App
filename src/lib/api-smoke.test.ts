@@ -21,23 +21,15 @@
  * cleans up after itself even when it fails.
  */
 import { describe, expect, it, beforeAll } from 'bun:test'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { testDb } from '@/lib/test-db'
+import { loadDevEnv, testDb } from '@/lib/test-db'
 
 const BASE = 'http://localhost:3000'
 
-// `bun test` does not load .env.local, which the direct-DB cleanup fallback at
-// the bottom needs. Read it here instead of adding a dotenv dependency.
-if (!process.env.DATABASE_URL) {
-  const envFile = path.resolve(import.meta.dir, '../../.env.local')
-  if (existsSync(envFile)) {
-    for (const line of readFileSync(envFile, 'utf8').split('\n')) {
-      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"?(.*?)"?\s*$/)
-      if (match && !process.env[match[1]]) process.env[match[1]] = match[2]
-    }
-  }
-}
+// The direct-DB cleanup fallback at the bottom needs `DATABASE_URL`, which
+// `bun test` does not pick up from `.env.local` on its own.
+loadDevEnv()
 const APP_DIR = path.resolve(import.meta.dir, '../app')
 const API_DIR = path.join(APP_DIR, 'api')
 
