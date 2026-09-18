@@ -35,9 +35,19 @@
 # prevents is the silent version, a preview tab attached to a server that will never
 # re-read its own config.
 #
+# Since the same reasoning applies to a service that is simply *gone*, this run also hands
+# the stack to a supervisor (`dev-supervise.sh`) as its last act: one process that watches
+# both ports and, when one stops being served, puts it back by running this very script
+# again — reusing what is still up and starting only what is missing. That is what makes a
+# dead relay behind a working app a reported event instead of a silence: every detection,
+# repair and failure is a line in `.zscripts/dev-supervisor.log`, and the counts are in the
+# summary below and in `--json` on the next run. `--no-supervise` turns it off (CI's own
+# repair runs pass it, so a repair cannot nest a second supervisor).
+#
 # Usage:
 #   npm run dev:up                    # or: bash .zscripts/dev-up.sh
 #   bash .zscripts/dev-up.sh --no-schema   # skip prisma generate / db push
+#   bash .zscripts/dev-up.sh --no-supervise # start nothing that keeps watching after this run
 #   bash .zscripts/dev-up.sh --pid         # print the app-port listener pid, start nothing
 #   bash .zscripts/dev-up.sh --preview     # print the register_preview call to run,
 #                                          # start nothing; non-zero if not registerable
@@ -49,6 +59,10 @@
 #                   .zscripts/). Point it at a temp dir to exercise a scratch
 #                   port without truncating the logs of the live services.
 #   SOCKET_PORT     override the live-update socket port (default: index.ts)
+#   DEV_UP_SUPERVISE=0  same as --no-supervise
+#   DEV_SUPERVISE_INTERVAL / DEV_SUPERVISE_MAX_FAILURES / DEV_SUPERVISE_COOLDOWN
+#                   how often the supervisor checks, and how hard it tries to repair
+#                   a service that will not come back (see dev-supervise.sh).
 #   DEV_UP_APP_TIMEOUT  seconds to wait for the app to listen (default 120) and
 #                   then to answer (default 90). CI raises it for a cold runner.
 #   DEV_UP_PREVIEW_TIMEOUT  seconds --preview gives the URL to answer before refusing to
@@ -81,12 +95,18 @@ SCHEMA=1
 PID_ONLY=0
 PREVIEW_ONLY=0
 JSON=0
+# Supervision is on by default: "start and forget" is the failure this replaced. The escape
+# hatches are for the callers that must not have one — CI's own start of a scratch stack, and
+# the supervisor's repair run, which is already supervised by the process that spawned it.
+SUPERVISE="${DEV_UP_SUPERVISE:-1}"
 for arg in "$@"; do
   case "$arg" in
     --no-schema) SCHEMA=0 ;;
     --pid) PID_ONLY=1 ;;
     --preview) PREVIEW_ONLY=1 ;;
     --json) JSON=1 ;;
+    --no-supervise) SUPERVISE=0 ;;
+    --supervise) SUPERVISE=1 ;;
     -h|--help)
       usage "$SELF"
       exit 0
@@ -384,6 +404,15 @@ STALE_DEV_CHECKED=""; STALE_DEV_STARTED=""; STALE_DEV_CHANGED=""; STALE_DEV_AGE=
 STALE_SOCKET_CHECKED=""; STALE_SOCKET_STARTED=""; STALE_SOCKET_CHANGED=""; STALE_SOCKET_AGE=""; STALE_SOCKET_PATH=""
 STATE_DEV="skipped"; PID_DEV=""; SUP_DEV=""; OURS_DEV=0
 APP_LISTENING=0
+# The supervisor: `started` (this run handed the stack to a new one), `reused` (one was
+# already watching this checkout), `replaced` (one was watching different ports, so it was
+# stopped and this run's took over), `skipped` (asked not to, or the stack never came up).
+# Its counts come from its own record, never from this run's memory, because the interesting
+# restarts happened while this script was not running.
+STATE_SUPERVISOR="skipped"; PID_SUPERVISOR=""; SUPERVISOR_NOTE=""
+SUPERVISOR_RESTARTS=""; SUPERVISOR_RESTARTS_DEV=""; SUPERVISOR_RESTARTS_SOCKET=""
+SUPERVISOR_LAST_SERVICE=""; SUPERVISOR_LAST_KIND=""; SUPERVISOR_LAST_DETAIL=""
+SUPERVISOR_LAST_AT=""; SUPERVISOR_GAVE_UP=""; SUPERVISOR_SINCE=""
 # The status the readiness probe below got from the app, so the preview handoff can
 # say whether the URL it names actually answers — and whether it is worth
 # registering. Empty means "not probed yet".
@@ -423,6 +452,16 @@ build_report() {
   REP_SOCKET_STALE_CHANGED="${STALE_SOCKET_CHANGED:-}" REP_SOCKET_STALE_AGE="${STALE_SOCKET_AGE:-}"
   REP_SOCKET_STALE_PATH="${STALE_SOCKET_PATH:-}"
   REP_RESTART_CMD="$RESTART_CMD"
+  # The supervisor: what is watching this stack now, and what it has had to repair since it
+  # started. Read out of its own record rather than remembered here, because the restarts
+  # worth reporting are the ones that happened while this script was not running.
+  REP_SUPERVISOR_STATE="$STATE_SUPERVISOR" REP_SUPERVISOR_PID="$PID_SUPERVISOR"
+  REP_SUPERVISOR_NOTE="$SUPERVISOR_NOTE" REP_SUPERVISOR_RESTARTS="$SUPERVISOR_RESTARTS"
+  REP_SUPERVISOR_LAST_SERVICE="$SUPERVISOR_LAST_SERVICE" REP_SUPERVISOR_LAST_KIND="$SUPERVISOR_LAST_KIND"
+  REP_SUPERVISOR_LAST_DETAIL="$SUPERVISOR_LAST_DETAIL" REP_SUPERVISOR_LAST_AT="$SUPERVISOR_LAST_AT"
+  REP_SUPERVISOR_GAVE_UP="$SUPERVISOR_GAVE_UP"
+  REP_SUPERVISOR_RECORD="$SUPERVISOR_STATE" REP_SUPERVISOR_LOG="$SUPERVISOR_LOG"
+  REP_SUPERVISOR_WATCH_APP="$APP_PORT" REP_SUPERVISOR_WATCH_SOCKET="$SOCKET_PORT"
   # "self" or "probe": which route named the dev server's pid. Defaulted because a
   # failure path can build this report before any pid has been resolved.
   REP_DEV_PID_SOURCE="${SERVER_PID_SOURCE:-}"
@@ -445,6 +484,10 @@ build_report() {
   export REP_SOCKET_STALE_CHECKED REP_SOCKET_STALE_STARTED REP_SOCKET_STALE_CHANGED REP_SOCKET_STALE_AGE REP_SOCKET_STALE_PATH
   export REP_RESTART_CMD
   export REP_PREVIEW_URL REP_PREVIEW_PID REP_PREVIEW_HTTP REP_PREVIEW_READY REP_PREVIEW_NOTE
+  export REP_SUPERVISOR_STATE REP_SUPERVISOR_PID REP_SUPERVISOR_NOTE REP_SUPERVISOR_RESTARTS
+  export REP_SUPERVISOR_LAST_SERVICE REP_SUPERVISOR_LAST_KIND REP_SUPERVISOR_LAST_DETAIL REP_SUPERVISOR_LAST_AT
+  export REP_SUPERVISOR_GAVE_UP REP_SUPERVISOR_RECORD REP_SUPERVISOR_LOG
+  export REP_SUPERVISOR_WATCH_APP REP_SUPERVISOR_WATCH_SOCKET
   node -e '
     const fs = require("fs");
     const e = process.env;
@@ -518,6 +561,28 @@ build_report() {
             : null,
         note: e.REP_PREVIEW_NOTE || null,
       },
+      // What keeps this stack up now that dev-up has returned, and what it has had to put
+      // back since. `state: skipped` says why in `note` — asked not to (`--no-supervise`),
+      // or nothing was up to supervise. `restarts` is the number that answers the question
+      // this exists for: "did anything die while I was not looking?".
+      supervisor: {
+        state: e.REP_SUPERVISOR_STATE,
+        pid: num(e.REP_SUPERVISOR_PID),
+        watching: { app: num(e.REP_SUPERVISOR_WATCH_APP), socket: num(e.REP_SUPERVISOR_WATCH_SOCKET) },
+        restarts: num(e.REP_SUPERVISOR_RESTARTS),
+        lastEvent: e.REP_SUPERVISOR_LAST_KIND
+          ? {
+              at: e.REP_SUPERVISOR_LAST_AT || null,
+              service: e.REP_SUPERVISOR_LAST_SERVICE || null,
+              kind: e.REP_SUPERVISOR_LAST_KIND,
+              detail: e.REP_SUPERVISOR_LAST_DETAIL || null,
+            }
+          : null,
+        gaveUp: (e.REP_SUPERVISOR_GAVE_UP || "").split(" ").filter(Boolean),
+        record: e.REP_SUPERVISOR_RECORD || null,
+        log: e.REP_SUPERVISOR_LOG || null,
+        note: e.REP_SUPERVISOR_NOTE || null,
+      },
       schema: { state: e.REP_SCHEMA_STATE },
       database: {
         host: e.REP_DB_HOST || null,
@@ -553,6 +618,13 @@ build_report() {
           service.startedByDevUp = true;
           if (!service.supervisor && before.supervisor) service.supervisor = before.supervisor;
         }
+      }
+      // A run that did not resolve a supervisor of its own did not stop watching one
+      // either: the supervisor repairs the stack by running this script with
+      // `--no-supervise`, and that repair must not erase the record of the process that
+      // asked for it. Only a run that recorded a pid here speaks for supervision.
+      if (!report.supervisor.pid && prev.supervisor && prev.supervisor.pid) {
+        report.supervisor = prev.supervisor;
       }
     }
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
@@ -917,6 +989,120 @@ elif [ -z "$PREVIEW_HTTP" ] || [ "$PREVIEW_HTTP" = "000" ]; then
   PREVIEW_NOTE="pid $PREVIEW_PID owns $APP_PORT but the app never answered $PREVIEW_URL, so registering it would only show an error page — check $(native_path "$DEV_LOG")"
 fi
 
+# ------------------------------------------------------------- 3b. supervision
+
+# Hand the running stack to the process whose whole job is to notice when it stops being
+# running. Last, because it watches what this run has just confirmed; skipped when the stack
+# did not come up, because a supervisor started then would only enter the repair loop before
+# anyone has read the first failure's cause.
+step "supervisor"
+if [ "$SUPERVISE" != 1 ]; then
+  STATE_SUPERVISOR="skipped"
+  SUPERVISOR_NOTE="asked not to supervise (--no-supervise, or DEV_UP_SUPERVISE=0)"
+  info "not started: $SUPERVISOR_NOTE"
+elif [ "$APP_LISTENING" != 1 ] || ! port_taken "$SOCKET_PORT"; then
+  STATE_SUPERVISOR="skipped"
+  SUPERVISOR_NOTE="not started: the stack is not up (app listening on :$APP_PORT: $APP_LISTENING; socket on :$SOCKET_PORT served: $(port_taken "$SOCKET_PORT" && printf yes || printf no))"
+  warn "no supervisor started — $SUPERVISOR_NOTE"
+else
+  running="$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT")"
+  watching_app="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" watching.app)"
+  watching_socket="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" watching.socket)"
+  replacing=""
+  if [ -n "$running" ] && [ "$watching_app" = "$APP_PORT" ] && [ "$watching_socket" = "$SOCKET_PORT" ]; then
+    STATE_SUPERVISOR="reused"; PID_SUPERVISOR="$running"
+    info "already watching (pid $running, app :$watching_app, socket :$watching_socket)"
+  else
+    if [ -n "$running" ]; then
+      # It is alive and it is this checkout's, but it is watching a different set of ports —
+      # a SOCKET_PORT override since it started, most likely. Replacing it is the honest
+      # move: a supervisor watching a port nobody uses would report nothing forever.
+      info "replacing the supervisor on pid $running (it was watching app :${watching_app:-?}, socket :${watching_socket:-?})"
+      kill_tree "$running"
+      replacing="replaced"
+    fi
+    # The pid that matters is the one the supervisor publishes about itself, not the one
+    # this script's nohup wrapper got (on Windows the wrapper is a different process), so
+    # the record is waited for rather than assumed — the same rule the two services follow.
+    start_detached "$ROOT" "$SUPERVISOR_LOG" env \
+      DEV_UP_LOG_DIR="$LOG_DIR" \
+      SUPERVISE_APP_PORT="$APP_PORT" \
+      SUPERVISE_SOCKET_PORT="$SOCKET_PORT" \
+      "${BASH:-bash}" "$ROOT/.zscripts/dev-supervise.sh"
+    waited=0
+    while [ "$waited" -lt 10 ]; do
+      PID_SUPERVISOR="$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT")"
+      [ -n "$PID_SUPERVISOR" ] && break
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if [ -n "$PID_SUPERVISOR" ]; then
+      STATE_SUPERVISOR="${replacing:-started}"
+      info "${replacing:+replaced — }watching (pid $PID_SUPERVISOR, every ${DEV_SUPERVISE_INTERVAL:-10}s, log $(native_path "$SUPERVISOR_LOG"))"
+    else
+      STATE_SUPERVISOR="failed"
+      SUPERVISOR_NOTE="it did not publish its own record within 10s — see $(native_path "$SUPERVISOR_LOG")"
+      warn "no supervisor is watching this stack: $SUPERVISOR_NOTE"
+    fi
+  fi
+fi
+
+# What it has had to put back, read out of its own record — never remembered here, because
+# the restarts worth reporting happened while this script was not running.
+if [ "$STATE_SUPERVISOR" = "started" ] || [ "$STATE_SUPERVISOR" = "replaced" ] || [ "$STATE_SUPERVISOR" = "reused" ]; then
+  SUPERVISOR_RESTARTS="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" restarts.total)"
+  SUPERVISOR_RESTARTS_DEV="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" restarts.dev)"
+  SUPERVISOR_RESTARTS_SOCKET="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" restarts.socket)"
+  SUPERVISOR_LAST_SERVICE="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" lastEvent.service)"
+  SUPERVISOR_LAST_KIND="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" lastEvent.kind)"
+  SUPERVISOR_LAST_DETAIL="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" lastEvent.detail)"
+  SUPERVISOR_LAST_AT="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" lastEvent.at)"
+  SUPERVISOR_GAVE_UP="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" gaveUp | tr -d '[]"' | tr ',' ' ')"
+  SUPERVISOR_SINCE="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" startedAt)"
+
+  if [ -n "$SUPERVISOR_RESTARTS" ] && [ "$SUPERVISOR_RESTARTS" != 0 ]; then
+    warn "the supervisor has restarted the stack $SUPERVISOR_RESTARTS time(s) since it started at $SUPERVISOR_SINCE: dev server :${SUPERVISOR_RESTARTS_DEV:-0}×, socket service :${SUPERVISOR_RESTARTS_SOCKET:-0}× (last: $SUPERVISOR_LAST_SERVICE, $SUPERVISOR_LAST_KIND${SUPERVISOR_LAST_DETAIL:+ — $SUPERVISOR_LAST_DETAIL})"
+    warn "  not a quiet event to leave unread: $(native_path "$SUPERVISOR_LOG") has one line per detection, attempt and outcome"
+  fi
+  if [ -n "$SUPERVISOR_GAVE_UP" ]; then
+    warn "the supervisor has stopped trying to repair quickly for:$SUPERVISOR_GAVE_UP — it is still watching, but at most once every ${DEV_SUPERVISE_COOLDOWN:-300}s"
+  fi
+  # A restart of the app is the one restart that invalidates something outside this script:
+  # the pid a Preview tab was registered with. Nothing here can re-register it, so the
+  # current call is printed (as ever) and the fact is said out loud.
+  if [ -n "$SUPERVISOR_RESTARTS_DEV" ] && [ "$SUPERVISOR_RESTARTS_DEV" != 0 ]; then
+    warn "the dev server was restarted by the supervisor ${SUPERVISOR_RESTARTS_DEV}× — a Preview tab registered before that holds a dead pid; re-register with the call below"
+  fi
+fi
+
+supervisor_text() {
+  case "$STATE_SUPERVISOR" in
+    started) printf 'started (pid %s) — watching :%s and :%s' "$PID_SUPERVISOR" "$APP_PORT" "$SOCKET_PORT" ;;
+    replaced) printf 'replaced the previous one (pid %s) — watching :%s and :%s' "$PID_SUPERVISOR" "$APP_PORT" "$SOCKET_PORT" ;;
+    reused) printf 'already watching (pid %s) — watching :%s and :%s' "$PID_SUPERVISOR" "$APP_PORT" "$SOCKET_PORT" ;;
+    failed) printf 'NOT RUNNING — %s' "$SUPERVISOR_NOTE" ;;
+    *) printf 'none — %s' "$SUPERVISOR_NOTE" ;;
+  esac
+}
+
+# One line for the summary: what is watching, and the number that answers "did anything die
+# while I was not looking?" — with the honest answer when there was nothing to compare.
+#
+# The line before it is the restart total; `0` and "nothing restarted yet" are different
+# sentences on purpose, because a supervisor that has never had to act and one that has just
+# been started look identical from outside.
+supervisor_note() {
+  printf '  supervisor: %s\n' "$(supervisor_text)"
+  if [ -n "$SUPERVISOR_RESTARTS" ]; then
+    if [ "$SUPERVISOR_RESTARTS" = 0 ]; then
+      printf '  %s\n' "             nothing restarted since it started"
+    else
+      printf '  %s\n' "             restarted $SUPERVISOR_RESTARTS× (dev :${SUPERVISOR_RESTARTS_DEV:-0}, socket :${SUPERVISOR_RESTARTS_SOCKET:-0}), last $SUPERVISOR_LAST_AT: $SUPERVISOR_LAST_SERVICE $SUPERVISOR_LAST_KIND${SUPERVISOR_LAST_DETAIL:+ — $SUPERVISOR_LAST_DETAIL}"
+      printf '  %s\n' "             log: $(native_path "$SUPERVISOR_LOG")"
+    fi
+  fi
+}
+
 print_summary() {
   printf '\n%s\n' "──────────────────────────────────────────────────────────────"
   printf '  %-12s %-7s %-8s %s\n' service port pid state
@@ -940,6 +1126,7 @@ print_summary() {
   # published no boot marker says nothing here rather than the reassuring thing.
   stale_note DEV "the dev server" "$APP_PORT" "$PID_DEV"
   stale_note SOCKET "the socket service" "$SOCKET_PORT" "$PID_SOCKET"
+  supervisor_note
   printf '  %s\n' "logs:    $(native_path "$DEV_LOG")  ·  $(native_path "$SOCKET_LOG")"
 }
 

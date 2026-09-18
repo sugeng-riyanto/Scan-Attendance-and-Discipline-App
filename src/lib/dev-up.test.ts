@@ -90,6 +90,23 @@ if (!ENABLED) {
   }
 }
 
+/**
+ * What dev-up says about the process now keeping this stack up, and what it had to repair.
+ * The restart counts come from the supervisor's own record, which is the point: they describe
+ * things that happened while dev-up was not running.
+ */
+type SupervisorReport = {
+  state: string
+  pid: number | null
+  watching: { app: number | null; socket: number | null }
+  restarts: number | null
+  lastEvent: { at: string | null; service: string | null; kind: string; detail: string | null } | null
+  gaveUp: string[]
+  record: string | null
+  log: string | null
+  note: string | null
+}
+
 type ServiceReport = {
   port: number | null
   pid: number | null
@@ -132,6 +149,8 @@ type DevUpReport = {
   pidFile: string
   schema: { state: string }
   services: { postgres: ServiceReport; socket: ServiceReport; dev: ServiceReport }
+  /** The supervisor watching this stack: what it is, and what it has had to put back. */
+  supervisor: SupervisorReport
   /** The Preview-tab handoff: the URL, the verified pid, and the call to run. */
   preview: {
     url: string
@@ -208,6 +227,8 @@ type DownReport = {
   socketPidFile: string | null
   socketPidFileRemoved: boolean
   services: Record<string, DownService>
+  /** What was watching before this ran, and what happened to it. Stopped first, always. */
+  supervisor: { action: string | null; reason: string | null; pid: number | null; restarts: number | null; record: string | null }
   stopped: string[]
   stillListening: number[]
 }
@@ -446,6 +467,11 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
   /** Whether the scratch bring-up happened at all, so later cases can skip cleanly. */
   let scratchStackStarted = false
   let scratchPid: number | null = null
+  /**
+   * The supervisor this suite started on a scratch stack, so a case that fails half-way
+   * cannot leave a process behind that keeps restarting things.
+   */
+  let scratchSupervisorPid: number | null = null
 
   beforeAll(() => {
     if (!BASH) throw new Error('no bash on PATH — set DEV_UP_BASH to its absolute path')
@@ -459,6 +485,7 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
   })
 
   afterAll(async () => {
+    if (scratchSupervisorPid && isAlive(scratchSupervisorPid)) killTree(scratchSupervisorPid)
     if (scratchPid && isAlive(scratchPid)) killTree(scratchPid)
     if (scratchDir) rmSync(scratchDir, { recursive: true, force: true })
     for (const helper of helperProcs) if (helper.pid) killTree(helper.pid)
@@ -1420,6 +1447,150 @@ suite('local stack — dev-up.sh / dev-down.sh', () => {
       })
       expect(staleSocket.stderr).toMatch(/stale:\s+the socket service on :\d+/)
       expect(staleSocket.stderr).toContain('no watcher')
+    },
+    300_000,
+  )
+
+  it(
+    'puts a killed service back without being asked, records it, and dev-down stops it first',
+    async () => {
+      if (!BASH || !first) throw new Error('the first run never happened')
+
+      // A scratch stack of its own — a socket port nothing else uses, its own log directory —
+      // while the app stays the live one, so this case disturbs nothing a Preview tab is
+      // watching. The supervisor's job is the same either way: notice a port that stopped
+      // being served, and put it back. A two-second interval is so the case takes seconds;
+      // the defaults (10s) are what a person runs.
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'dev-up-supervise-'))
+      helperDirs.push(dir)
+      const port = freePort(3310)
+      const env = {
+        SOCKET_PORT: String(port),
+        DEV_UP_LOG_DIR: dir,
+        DEV_SUPERVISE_INTERVAL: '2',
+        DEV_SUPERVISE_COOLDOWN: '20',
+      }
+      const recordFile = path.join(dir, 'dev-supervisor.state.json')
+      const logFile = path.join(dir, 'dev-supervisor.log')
+      const readRecord = () =>
+        JSON.parse(readFileSync(recordFile, 'utf8')) as {
+          pid: number
+          root: string
+          watching: { app: number; socket: number }
+          restarts: { total: number; dev: number; socket: number }
+          lastEvent: { kind: string; service: string; wasPid: number | null; nowPid: number | null } | null
+          gaveUp: string[]
+        }
+
+      const started = devUp(['--no-schema'], env)
+      expect(started.report.socketPort).toBe(port)
+      expect(started.report.services.socket.state).toBe('started')
+
+      // 1. It is running, it says so about itself, and it is watching the two ports this
+      //    stack serves. The pid has to be the OS's own number, not a shell's idea of one:
+      //    under Git Bash `$$` is an MSYS pid that no Windows tool can see, and a supervisor
+      //    reporting one would be dismissed as gone by everything that reads it.
+      expect(started.report.supervisor.state).toBe('started')
+      const supervisorPid = started.report.supervisor.pid
+      expect(supervisorPid).not.toBeNull()
+      scratchSupervisorPid = supervisorPid
+      expect(isAlive(supervisorPid as number)).toBe(true)
+      expect(started.report.supervisor.watching).toEqual({ app: first.report.appPort, socket: port })
+
+      const fresh = readRecord()
+      expect(fresh.pid).toBe(supervisorPid as number)
+      expect(fresh.watching).toEqual({ app: first.report.appPort, socket: port })
+      expect(fresh.restarts).toEqual({ total: 0, dev: 0, socket: 0 })
+      // Nothing has gone wrong yet, and the report says that in words rather than leaving a
+      // reader to infer it from a zero.
+      expect(started.report.supervisor.restarts).toBe(0)
+      expect(started.stderr).toContain('nothing restarted since it started')
+      expect(started.stderr).not.toMatch(/has restarted the stack/)
+
+      // 2. Kill the scratch service the way a crash looks — no clean exit, no claim removed.
+      //    The port going quiet is what proves the pid really owned it.
+      const claim = JSON.parse(readFileSync(path.join(dir, 'attendance-socket.json'), 'utf8')) as {
+        pid: number
+        port: number
+      }
+      expect(claim.port).toBe(port)
+      const killedPid = claim.pid
+      expect(killTree(killedPid)).toBe(true)
+      expect(await waitFor(() => listenerPids(port).length === 0, 15_000)).toBe(true)
+
+      // 3. Nobody asks it to: it notices, repairs through dev-up, and the port is served
+      //    again under a new pid. This is the whole point — a dead relay behind a working app
+      //    used to sit there unnoticed until a dashboard silently stopped moving.
+      const backUp = await waitFor(() => listenerPids(port).length > 0, 120_000)
+      expect(backUp).toBe(true)
+      const newPid = listenerPids(port)[0] as number
+      expect(newPid).not.toBe(killedPid)
+
+      // 4. The repair is in its record and its log, with both pids, so "what died and what
+      //    replaced it" is answerable afterwards rather than only observable live.
+      //
+      //    Waited for rather than read once: the port is served as soon as the repair's
+      //    dev-up binds it, while the record is written a moment later, once that run has
+      //    returned and been verified. Asserting on the first read would be asserting on the
+      //    gap between two correct things.
+      const recorded = await waitFor(() => {
+        try {
+          return readRecord().restarts.socket === 1
+        } catch {
+          return false
+        }
+      }, 30_000)
+      expect(recorded).toBe(true)
+      const afterRepair = readRecord()
+      expect(afterRepair.restarts).toMatchObject({ dev: 0, socket: 1 })
+      expect(afterRepair.lastEvent).toMatchObject({ kind: 'restarted', service: 'socket', wasPid: killedPid })
+      expect(afterRepair.lastEvent?.nowPid).toBe(newPid)
+      const log = readFileSync(logFile, 'utf8')
+      expect(log).toContain(`nothing is serving :${port} (recorded pid ${killedPid})`)
+      expect(log).toContain(`back up: live-update socket service on :${port} (pid ${newPid})`)
+
+      // 5. …and, which is what makes it impossible to miss, the next bring-up reports it. The
+      //    count comes from the supervisor's own record, so it survives the script that wrote
+      //    it having exited long ago.
+      const reported = devUp(['--no-schema'], env)
+      expect(reported.report.supervisor.state).toBe('reused')
+      expect(reported.report.supervisor.pid).toBe(supervisorPid as number)
+      expect(reported.report.supervisor.restarts).toBe(1)
+      expect(reported.report.supervisor.lastEvent).toMatchObject({ service: 'socket', kind: 'restarted' })
+      // Plain substrings, not a pattern: the sentence contains parentheses and the counts
+      // contain a multiplication sign, and an assertion about the wording of a warning should
+      // not be the place where escaping is got wrong.
+      expect(reported.stderr).toContain('the supervisor has restarted the stack 1 time(s) since it started')
+      expect(reported.stderr).toContain('socket service :1×')
+      expect(reported.stderr).toContain('not a quiet event to leave unread')
+      // A second supervisor is not started, and the one that is running is not replaced.
+      expect(reported.report.services.dev.pid).toBe(first.report.services.dev.pid)
+
+      // 6. dev-down stops it *before* the services. This is the ordering that matters: a
+      //    supervisor left running past its own services would simply start them again, and
+      //    the teardown would look like a leak that keeps coming back.
+      const down = devDown(env)
+      expect(down.report.supervisor.action).toBe('stopped')
+      expect(down.report.supervisor.pid).toBe(supervisorPid as number)
+      expect(down.report.supervisor.restarts).toBe(1)
+      expect(await waitFor(() => !isAlive(supervisorPid as number), 15_000)).toBe(true)
+      expect(down.report.services.socket?.action).toBe('stopped')
+
+      // …and it stays down. Three intervals of a two-second watch is long enough for a
+      // supervisor that was still alive to have put the service back.
+      await new Promise((resolve) => setTimeout(resolve, 6_000))
+      expect(listenerPids(port)).toEqual([])
+      expect(isAlive(supervisorPid as number)).toBe(false)
+      // The live app was reused, not started, so this teardown had no business touching it.
+      expect(listenerPids(first.report.appPort).length).toBeGreaterThan(0)
+
+      // 7. Nothing is watching now: the record went with the process it described, so a
+      //    second teardown has nothing live to stop. It says `already-down` rather than
+      //    `absent` on purpose — the state file still remembers the supervisor this stack
+      //    had, and the difference between "gone" and "never recorded" is worth keeping.
+      expect(existsSync(recordFile)).toBe(false)
+      const afterDown = devDown(env)
+      expect(afterDown.report.supervisor.action).toBe('already-down')
     },
     300_000,
   )

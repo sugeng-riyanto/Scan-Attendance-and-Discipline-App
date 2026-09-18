@@ -66,3 +66,10 @@ server.log
 # socket mini-service
 .zscripts/dev-server.json
 .zscripts/attendance-socket.json
+# what the supervisor writes about itself while it is running, and what it appends per
+# event: the record dev-up and dev-down read to report restarts (.zscripts/dev-supervise.sh).
+# Its .log files are already covered by *.log, and its per-repair output is a .log too —
+# only the JSON side of the record needs naming here.
+.zscripts/dev-supervisor.state.json
+.zscripts/dev-supervisor.events.jsonl
+.zscripts/dev-supervisor.restore.*.log.json

@@ -45,6 +45,12 @@ SOCKET_PID_FILE="$LOG_DIR/attendance-socket.json"
 # `IDENTITY_PATH` in src/lib/dev-server-identity.ts). This is what a boot-time claim is
 # confirmed against, because an answer on the port cannot be stale the way a file can.
 SERVER_IDENTITY_PATH="/api/dev-identity"
+# The supervisor: what keeps the two services up after dev-up returns (dev-supervise.sh).
+# Its *record* describes a process that is running and is removed when that process exits,
+# like the services' claims above; its *log* is the history of what it did and outlives it,
+# which is the file to read when asking "was anything restarted while I was not looking?".
+SUPERVISOR_STATE="$LOG_DIR/dev-supervisor.state.json"
+SUPERVISOR_LOG="$LOG_DIR/dev-supervisor.log"
 
 # ---------------------------------------------------------------- output helpers
 
@@ -184,6 +190,51 @@ claim_field() { # $1 file, $2 expected port, $3 expected directory, $4 field, $5
 # on, and the one dev-up hands to a preview.
 published_pid() { # $1 file, $2 expected port, $3 expected directory, $4 "0" to accept a claim whose pid is already gone
   claim_field "$1" "$2" "$3" pid "${4:-1}"
+}
+
+# One field of the supervisor's own record, or empty.
+#
+# The same idea as `claim_field`, minus the port: a supervisor owns no port, so what makes
+# its record *this* checkout's supervisor is the pid being alive, the record naming this
+# checkout, and — what the caller does with the rest — the ports it says it watches. A
+# record from another worktree, or one left behind by a supervisor that has since died, is
+# therefore ignored by everyone who asks, which is the whole reason dev-down can safely stop
+# something that was started long before it ran.
+#
+# `$3` is a dotted path, so `watching.app` and `restarts.total` are one call each. Objects
+# and arrays come back as JSON text, which is how `events` and `gaveUp` are read.
+# `$4 = 0` drops the liveness check, for the one caller that asks about a supervisor it has
+# *just* stopped — the same use `claim_field` documents for dev-down's claim removal.
+supervisor_field() { # $1 file, $2 expected root, $3 field (dotted), $4 "0" to accept a record whose pid is already gone
+  local file="$1" root="$2" field="$3"
+  [ -n "$file" ] && [ -r "$file" ] || return 0
+  node -e '
+    const fs = require("fs");
+    const [file, root, field, mustBeAlive] = process.argv.slice(1);
+    const norm = (p) => String(p).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    let record;
+    try { record = JSON.parse(fs.readFileSync(file, "utf8")); } catch { process.exit(0) }
+    if (!record || !Number.isInteger(record.pid) || record.pid <= 0) process.exit(0);
+    if (norm(record.root) !== norm(root)) process.exit(0);
+    if (mustBeAlive !== "0") {
+      try { process.kill(record.pid, 0); } catch (error) { if (error.code !== "EPERM") process.exit(0) }
+    }
+    let value = record;
+    for (const key of String(field).split(".")) {
+      if (value === null || typeof value !== "object") { value = undefined; break }
+      value = value[key];
+    }
+    if (value === undefined || value === null) process.exit(0);
+    if (typeof value === "object") process.stdout.write(JSON.stringify(value));
+    else process.stdout.write(String(value));
+  ' "$file" "$root" "$field" "${4:-1}" 2>/dev/null
+}
+
+# The pid of the supervisor watching this checkout, or empty — alive, and its record naming
+# this checkout, which is the whole test. Used by dev-up (is one already running?) and by
+# dev-down (which one to stop first).
+supervisor_pid() { # $1 file, $2 expected root, $3 "0" to accept a record whose pid is already gone
+  supervisor_field "$1" "$2" pid "${3:-1}"
 }
 
 # The pid a service reports over HTTP, or empty — for the services that answer.

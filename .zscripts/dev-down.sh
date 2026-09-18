@@ -4,6 +4,10 @@
 #
 # The flip side of `npm run dev:up`, and deliberately narrow:
 #
+#   * it stops the supervisor **first** — the process dev-up hands the stack to, which
+#     puts a dead service back by running dev-up again. Stopping the services first would
+#     have it repair them a few seconds later, which looks exactly like a stubborn leak;
+#     a supervisor left running after its services would keep resurrecting them;
 #   * it acts on the state dev-up recorded (.zscripts/dev-up.state.json), never
 #     on a port sweep or a command-line pattern match;
 #   * only a service that state marks `startedByDevUp: true` is a candidate. One
@@ -105,6 +109,7 @@ read_state_rows() {
 
 # --------------------------------------------------------------- what it decided
 
+ACT_SUP=""; WHY_SUP=""; SUP_PID_SEEN=""; SUP_RESTARTS=""
 ACT_DEV=""; WHY_DEV=""; DEV_PORT=""; DEV_PID=""
 ACT_SOCKET=""; WHY_SOCKET=""; SOCKET_PORT_SEEN=""; SOCKET_PID_SEEN=""
 ACT_PG=""; WHY_PG=""; PG_PORT=""; PG_PID=""
@@ -160,6 +165,67 @@ stop_service() { # $1 name, $2 port, $3 pid, $4 supervisor
 note "dev-down — $ROOT"
 note "  state: $(native_path "$STATE_FILE")"
 note "  logs:  $(native_path "$DEV_LOG")  ·  $(native_path "$SOCKET_LOG")"
+
+# ----------------------------------------------------------------- the supervisor
+
+# Stopped before anything else is touched, and for a reason that is invisible until it bites:
+# the supervisor's whole job is to notice a service that stopped being served and start it
+# again, so a dev-down that stopped the services first would watch them come straight back.
+# It is the stack's own process, so it goes first and the services it was watching go after.
+#
+# Two sources have to agree before anything is killed: the pid dev-up recorded, and the
+# supervisor's own record naming this checkout. Either side alone can be stale (a state file
+# from before a restart, a record whose process has exited and whose pid was recycled), and a
+# supervisor is a process nobody wants killed by inference.
+supervisor_pid_recorded() {
+  node -e '
+    const fs = require("fs");
+    try {
+      const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const pid = state.supervisor && state.supervisor.pid;
+      if (Number.isInteger(pid) && pid > 0) process.stdout.write(String(pid));
+    } catch (error) {}
+  ' "$(native_path "$STATE_FILE")" 2>/dev/null
+}
+
+if [ ! -f "$STATE_FILE" ]; then
+  ACT_SUP="absent"; WHY_SUP="no state file"
+else
+  recorded="$(supervisor_pid_recorded)"
+  live="$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT")"
+  SUP_RESTARTS="$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" restarts.total)"
+  step "supervisor"
+  if [ -z "$recorded" ] && [ -z "$live" ]; then
+    info "none recorded for this checkout"
+    ACT_SUP="absent"; WHY_SUP="none recorded"
+  elif [ -z "$live" ]; then
+    # The record survives a supervisor that died on its own (it is removed only on a clean
+    # exit), so a recorded pid with no live record means it is already gone.
+    info "already down: pid $recorded is not watching any more (no record of it)"
+    ACT_SUP="already-down"; WHY_SUP="its own record is gone"
+    rm -f "$SUPERVISOR_STATE"
+  elif [ -n "$recorded" ] && [ "$recorded" != "$live" ]; then
+    info "left alone: the state file names pid $recorded, but pid $live is what is watching this checkout"
+    warn "not killing a pid the record does not match — the next dev:up will reconcile them"
+    ACT_SUP="left-alone"; WHY_SUP="recorded pid does not match the live record"
+  else
+    SUP_PID_SEEN="$live"
+    info "stopping pid $live (it has restarted something ${SUP_RESTARTS:-0}× in this stack)"
+    kill_tree "$live"
+    # Wait for the record to go: the supervisor removes it on the way out, and that is a
+    # better signal that it is really gone than the signal we sent it.
+    waited=0
+    while [ "$waited" -lt 5 ] && [ -n "$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT" 0)" ]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if [ -n "$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT" 0)" ]; then
+      warn "pid $live is gone but left its record behind — removing $(native_path "$SUPERVISOR_STATE")"
+      rm -f "$SUPERVISOR_STATE"
+    fi
+    ACT_SUP="stopped"
+  fi
+fi
 
 if [ ! -f "$STATE_FILE" ]; then
   note ""
@@ -282,6 +348,8 @@ build_down_report() {
   REP_WRITTEN="$(date -u +%FT%TZ)" REP_PIDFILE_REMOVED="$PIDFILE_REMOVED" REP_STILL="$STILL"
   REP_LEAKED="$LEAKED"
   REP_DEV_ACTION="$ACT_DEV" REP_DEV_REASON="$WHY_DEV" REP_DEV_PORT="$DEV_PORT" REP_DEV_PID="$DEV_PID"
+  REP_SUP_ACTION="$ACT_SUP" REP_SUP_REASON="$WHY_SUP" REP_SUP_PID="$SUP_PID_SEEN" REP_SUP_RESTARTS="$SUP_RESTARTS"
+  REP_SUPERVISOR_STATE_FILE="$SUPERVISOR_STATE"
   REP_SOCKET_ACTION="$ACT_SOCKET" REP_SOCKET_REASON="$WHY_SOCKET"
   REP_SOCKET_PORT="$SOCKET_PORT_SEEN" REP_SOCKET_PID="$SOCKET_PID_SEEN"
   REP_PG_ACTION="$ACT_PG" REP_PG_REASON="$WHY_PG" REP_PG_PORT="$PG_PORT" REP_PG_PID="$PG_PID"
@@ -289,6 +357,7 @@ build_down_report() {
   export REP_SERVER_PID_FILE REP_SERVER_PIDFILE_REMOVED
   export REP_SOCKET_PID_FILE REP_SOCKET_PIDFILE_REMOVED
   export REP_DEV_ACTION REP_DEV_REASON REP_DEV_PORT REP_DEV_PID
+  export REP_SUP_ACTION REP_SUP_REASON REP_SUP_PID REP_SUP_RESTARTS REP_SUPERVISOR_STATE_FILE
   export REP_SOCKET_ACTION REP_SOCKET_REASON REP_SOCKET_PORT REP_SOCKET_PID
   export REP_PG_ACTION REP_PG_REASON REP_PG_PORT REP_PG_PID
   node -e '
@@ -315,6 +384,18 @@ build_down_report() {
       serverPidFileRemoved: e.REP_SERVER_PIDFILE_REMOVED === "true",
       socketPidFile: e.REP_SOCKET_PID_FILE || null,
       socketPidFileRemoved: e.REP_SOCKET_PIDFILE_REMOVED === "true",
+      // What was watching before this ran, and what happened to it. Reported first because
+      // it is the one thing here that had to be stopped *before* the services: a supervisor
+      // still running would have restarted them again, a few seconds behind this run.
+      supervisor: {
+        action: e.REP_SUP_ACTION || null,
+        reason: e.REP_SUP_REASON || null,
+        pid: num(e.REP_SUP_PID),
+        // How many times it had repaired this stack before being stopped — the count
+        // dev-down is the last chance to see, since the record goes with the process.
+        restarts: num(e.REP_SUP_RESTARTS),
+        record: e.REP_SUPERVISOR_STATE_FILE || null,
+      },
       services,
       stopped: Object.keys(services).filter((n) => services[n].action === "stopped"),
       // stillListening: every recorded port still served (services left alone are
@@ -333,6 +414,7 @@ action_text() { # $1 action
     left-alone) printf 'left alone' ;;
     already-down) printf 'already down' ;;
     failed) printf 'STILL RUNNING' ;;
+    absent) printf 'none for this checkout' ;;
     *) printf 'not in the state' ;;
   esac
 }
@@ -359,6 +441,8 @@ print_summary() {
   if [ "$SOCKET_PIDFILE_REMOVED" = true ]; then
     printf '  %s\n' "removed $(native_path "$SOCKET_PID_FILE") (and the claim it made about the socket service)"
   fi
+  sup_row="$(action_text "$ACT_SUP")"
+  printf '  %s\n' "supervisor: $sup_row${SUP_PID_SEEN:+ (pid $SUP_PID_SEEN)}"$([ -n "$SUP_RESTARTS" ] && printf ' — it had restarted %s×' "$SUP_RESTARTS")
   if [ -n "$LEAKED" ]; then
     printf '  %s\n' "STILL SERVING after a forced stop: ${LEAKED% }"
   elif [ -n "$STILL" ]; then
