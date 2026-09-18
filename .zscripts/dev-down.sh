@@ -212,18 +212,38 @@ else
     SUP_PID_SEEN="$live"
     info "stopping pid $live (it has restarted something ${SUP_RESTARTS:-0}× in this stack)"
     kill_tree "$live"
-    # Wait for the record to go: the supervisor removes it on the way out, and that is a
-    # better signal that it is really gone than the signal we sent it.
+    # Waited for by *process*, never by its record — the record can go first, and it used to:
+    # a supervisor between checks is inside a foreground sleep, bash defers a trap until that
+    # finishes, so an earlier version saw the record disappear and reported `stopped` about a
+    # process that was still running (the runner reaped it as an orphan at the end of the job).
+    # A few seconds of patience here is normal rather than a refusal.
     waited=0
-    while [ "$waited" -lt 5 ] && [ -n "$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT" 0)" ]; do
+    while [ "$waited" -lt 5 ] && pid_alive "$live"; do
       sleep 1
       waited=$((waited + 1))
     done
-    if [ -n "$(supervisor_pid "$SUPERVISOR_STATE" "$ROOT" 0)" ]; then
-      warn "pid $live is gone but left its record behind — removing $(native_path "$SUPERVISOR_STATE")"
-      rm -f "$SUPERVISOR_STATE"
+    if pid_alive "$live"; then
+      info "  still alive after ${waited}s (a supervisor can be mid-repair) — forcing the tree"
+      force_kill_tree "$live"
+      waited=0
+      while [ "$waited" -lt 5 ] && pid_alive "$live"; do
+        sleep 1
+        waited=$((waited + 1))
+      done
     fi
-    ACT_SUP="stopped"
+    if pid_alive "$live"; then
+      # Nothing else here can stop it, and it will put this stack back up a few seconds from
+      # now — which is worth a non-zero exit rather than a reassuring word.
+      warn "pid $live is still running after both attempts, and it will put the services back up"
+      ACT_SUP="failed"; WHY_SUP="still running after a forced stop"
+    else
+      ACT_SUP="stopped"
+      # A forced stop never runs the exit cleanup, so the record can outlive the process that
+      # wrote it — removed here, but only if it is still the one this run stopped.
+      if [ -f "$SUPERVISOR_STATE" ] && [ "$(supervisor_field "$SUPERVISOR_STATE" "$ROOT" pid 0)" = "$live" ]; then
+        rm -f "$SUPERVISOR_STATE"
+      fi
+    fi
   fi
 fi
 
@@ -456,8 +476,11 @@ REPORT="$(build_down_report)"
 
 if [ "$JSON" = 1 ]; then print_summary >&2; else print_summary; fi
 
+# A supervisor that would not stop counts as a failure of this teardown even though it owns
+# no port: it is the one thing here that will put the services back up, and reporting success
+# while it is still running is exactly the kind of reassurance this script avoids elsewhere.
 FAILED=0
-for a in "$ACT_DEV" "$ACT_SOCKET" "$ACT_PG"; do
+for a in "$ACT_DEV" "$ACT_SOCKET" "$ACT_PG" "$ACT_SUP"; do
   [ "$a" = "failed" ] && FAILED=1
 done
 

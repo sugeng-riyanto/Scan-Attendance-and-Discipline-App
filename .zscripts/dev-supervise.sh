@@ -378,5 +378,14 @@ while [ "$STOPPING" = 0 ]; do
     fi
     write_record
   done
-  sleep "$INTERVAL"
+  # The wait has to be interruptible, and a bare `sleep` is not: bash runs a trapped signal
+  # only when the command in the foreground finishes, so `npm run dev:down` used to wait out a
+  # whole interval before this process even looked at the request to stop (measured: 10s —
+  # exactly DEV_SUPERVISE_INTERVAL). dev-down escalated to a forced kill, the runner had to
+  # reap this process and its `sleep` as orphans at the end of the job, and the record had
+  # already gone — so `stopped` was being reported about something still running. Sleeping in
+  # the background and waiting on it means the trap runs the moment the signal arrives.
+  sleep "$INTERVAL" &
+  SLEEP_PID=$!
+  wait "$SLEEP_PID" 2>/dev/null || true
 done

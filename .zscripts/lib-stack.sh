@@ -596,6 +596,23 @@ force_kill_tree() { # $1 pid
   kill -KILL "$pid" 2>/dev/null
 }
 
+# Is this pid alive, as the operating system numbers pids?
+#
+# Not `kill -0`, and the difference is the whole reason this exists: under Git Bash `kill`
+# speaks MSYS pids, so a Windows pid handed to it can match an unrelated MSYS process — a
+# liveness check that answers yes about the wrong thing. Node is a native binary on both
+# platforms, so `process.kill(pid, 0)` asks the OS about the pid the claims and the
+# supervisor's record actually hold. EPERM counts as alive, exactly as in `claim_field`: the
+# process exists, we just may not signal it.
+pid_alive() { # $1 pid
+  local pid="${1:-}"
+  [ -n "$pid" ] || return 1
+  node -e '
+    try { process.kill(Number(process.argv[1]), 0); process.exit(0) }
+    catch (error) { process.exit(error.code === "EPERM" ? 0 : 1) }
+  ' "$pid" 2>/dev/null
+}
+
 # "reused" with no pid means something is serving the port that the OS will not
 # name for us (a container's published port) — say so, rather than printing a
 # bare dash next to "reused" and looking broken.
