@@ -136,6 +136,31 @@ was no boot marker to compare against, which is not the same answer as current �
 `--preview` still prints its call, since the pid and the URL are current even when the code
 is not.
 
+**Nothing is left unattended once `dev:up` returns.** Its last act is to hand the running
+stack to `.zscripts/dev-supervise.sh` — one process that watches both ports and, when one stops
+being served, puts it back by running *the same script a developer runs* (`dev-up.sh
+--no-schema --json --no-supervise`, idempotent by contract, so it starts exactly the service
+that is missing and leaves the rest alone). The failure this is aimed at is the quiet one: the
+relay on :3003 dies, the app on :3000 keeps answering, a Preview tab looks fine, and no
+dashboard ever updates again. "Crashed" means *the port stopped being served*, which is the
+only thing that can be diagnosed with certainty here — an app answering 500s is up, and so is a
+relay that is listening but never connected (a missing `SOCKET_RELAY_TOKEN`, which `dev:up`
+warns about when it starts one). It is bounded, because a repair loop that ran forever would be
+worse than the crash: a service that will not come back is retried on an exponential backoff
+and, after `DEV_SUPERVISE_MAX_FAILURES` consecutive failures, at most once every
+`DEV_SUPERVISE_COOLDOWN` seconds — with the give-up recorded rather than silent, and the other
+service watched the whole time (the backoff is a deadline, never a sleep). PostgreSQL is
+deliberately not supervised: deciding unattended that a database should come back is not a
+repair this script is willing to make. Every detection, repair and failure is a timestamped
+line in `.zscripts/dev-supervisor.log`, the counts live in the record beside it
+(`.zscripts/dev-supervisor.state.json`), and the next `dev:up` reports them in words *and* as
+`supervisor.restarts` in `--json` — so "did anything die while I was not looking?" has an
+answer that does not depend on having been watching. An app restart changes the pid a Preview
+tab was registered with, and nothing here can re-register it: the current call is printed (as
+it always is) and the summary says the tab is stale, so a dead tab has a stated cause instead
+of a mystery. `--no-supervise` (or `DEV_UP_SUPERVISE=0`) starts nothing that keeps watching,
+which is what a repair run passes, so a repair never nests a second supervisor.
+
 The summary's last line is the whole **Preview-tab handoff** —
 `register_preview({ url: "http://localhost:3000/", pid: … })` — rendered from that
 verified pid, so opening the app in a Preview tab never means rediscovering the
@@ -163,6 +188,13 @@ Its counterpart stops exactly what that command started, and nothing else:
 ```bash
 npm run dev:down        # or: bash .zscripts/dev-down.sh
 ```
+
+The supervisor goes down **first**, before any service, because it is the process whose whole
+job is to put a dead one back: a teardown that stopped the services first would watch them come
+straight back a few seconds later, which reads exactly like a leak that refuses to die. It is
+stopped only when two sources agree — the pid `dev:up` recorded and its own record naming this
+checkout — and `--json` carries `supervisor.action` (`stopped|left-alone|already-down|absent`)
+with the last restart count it had made, since that record leaves with the process.
 
 It acts on the record `dev:up` wrote (`.zscripts/dev-up.state.json`) rather than sweeping
 ports or matching command lines, so a service `dev:up` merely *found* running — your own
@@ -196,6 +228,13 @@ whose services and boot markers the test controls, the app is reported stale for
 `.env.local` and current again once its marker moves, an absent marker is reported as
 "not checked" rather than as current, and the watcher-less socket service is reported stale
 for a change to its own source.
+And it covers the supervisor end to end, on a scratch port with its own log directory: that it
+starts and publishes its own record — naming the pid the *OS* uses, which is not `$$` under
+Git Bash — that a killed service comes back under a new pid without anyone asking, that the
+repair is in the record and the log with both pids (dead and replacement), that the next
+`dev:up` reports the restart, and that `dev:down` stops the supervisor before the services:
+the port then stays quiet for three watch intervals, which is the assertion a supervisor left
+running past its teardown would fail.
 
 Where a platform cannot name the pid holding a port, the suite skips the assertions that
 need one and says so — in CI as a `::notice::` annotation, so a step that passed by not

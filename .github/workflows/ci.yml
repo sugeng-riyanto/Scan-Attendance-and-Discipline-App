@@ -211,6 +211,20 @@ jobs:
           # can be slow; CI wants a hard failure, on the endpoint the old
           # readiness loop required to be exactly 200.
           curl -fsS -o /dev/null http://localhost:3000/api/schools/public
+          # A bring-up now leaves a supervisor watching both ports, and this runner is
+          # where the Linux half of it is exercised (the record's pid, the /proc-free
+          # liveness check, the repair path's own dev-up). A stack that came up without
+          # one is the failure the supervisor exists to prevent — a dead relay behind a
+          # working app going unnoticed — so it fails here rather than being inferred
+          # from a summary line nobody reads.
+          node -e '
+            const s = require("/tmp/dev-up.json").supervisor || {};
+            if (s.state !== "started" && s.state !== "reused") {
+              console.error("no supervisor is watching this stack: " + JSON.stringify(s));
+              process.exit(1);
+            }
+            console.log("supervisor " + s.state + " (pid " + s.pid + "), watching :" + s.watching.app + " and :" + s.watching.socket);
+          '
 
       # Seeded through the app's own endpoint, so the fixture is byte-for-byte
       # what a fresh install produces (3 schools, 42 users, 24 students).
@@ -289,6 +303,33 @@ jobs:
           # refuses to pass on a run that collected nothing.
           if ! grep -Eq '^ *[1-9][0-9]* pass' /tmp/dev-up-test.log; then
             echo '::error::the bring-up suite ran no tests, so this step verified nothing'
+            exit 1
+          fi
+          # What the supervisor had to put back during the whole job, from its own record.
+          # A repair here is a finding to read rather than an automatic failure: the suite's
+          # kill cases all use scratch ports and a scratch log directory, so a restart of
+          # the *live* stack means something died that no test asked to die — worth an
+          # annotation on the run page, and the counts say whether it happened at all. A
+          # record that is gone, though, means nothing is watching any more, which is the
+          # state this job just asserted it had left behind.
+          if [ -f .zscripts/dev-supervisor.state.json ]; then
+            node -e '
+              const r = require("./.zscripts/dev-supervisor.state.json");
+              const restarts = r.restarts || { total: 0, dev: 0, socket: 0 };
+              console.log("supervisor: pid " + r.pid + " watching " + JSON.stringify(r.watching) +
+                ", restarts dev " + restarts.dev + " socket " + restarts.socket +
+                ", gaveUp " + JSON.stringify(r.gaveUp || []));
+              if (restarts.total > 0) {
+                console.log("::warning title=the supervisor restarted a service during this job::" +
+                  JSON.stringify(r.lastEvent));
+              }
+              if ((r.gaveUp || []).length > 0) {
+                console.log("::error title=the supervisor gave up repairing a service::" +
+                  JSON.stringify(r.gaveUp) + " — see .zscripts/dev-supervisor.log");
+              }
+            '
+          else
+            echo '::error::no supervisor record at the end of the job — nothing is watching this stack'
             exit 1
           fi
           exit "$status"
